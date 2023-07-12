@@ -1,0 +1,68 @@
+name: Build and Publish
+
+on:
+  push:
+    branches: main
+  pull_request:
+
+jobs:
+  build:
+    name: Build and create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      
+      - name: Fetch Unity Engine modules
+        run: |
+          wget https://files.catbox.moe/i4sdl6.zip -O UnityModules.zip
+          unzip UnityModules.zip -d References
+
+      - name: Fetch API files
+        run: |
+          wget https://github.com/hk-modding/api/releases/latest/download/ModdingApiWin.zip -O API.zip
+          unzip -o API.zip -d References
+
+      # - name: Fetch a dependency
+      #   run: |
+      #     wget {dependencyLink} -O {dependencyName}.zip
+      #     unzip -o {dependencyName}.zip -d References
+          
+      - name: Setup MSBuild
+        run: sudo apt-get install -y nuget mono-devel mono-xbuild
+
+      - name: Restore packages
+        run: nuget restore HKRL.csproj
+
+      - name: Build project
+        run: dotnet build --configuration Release
+
+      - name: Get SHA256 of zipped mod
+        id: get_hash
+        run: echo "::set-output name=hash::$(sha256sum Output/HKRL.zip | cut -d ' ' -f 1)"
+
+      - name: Get Assembly version
+        id: get_version
+        run: echo "::set-output name=version::$(cat < Version.txt)"
+
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          release_name: Release v${{ steps.get_version.outputs.version }}
+          body: "SHA256: ${{ steps.get_hash.outputs.hash }}"
+          draft: false
+          prerelease: false
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: Output/HKRL.zip
+          asset_name: HKRL.zip
+          asset_content_type: application/zip
