@@ -6,6 +6,8 @@ using System.Reflection;
 using UnityEngine;
 using UObject = UnityEngine.Object;
 using HKRL.Utils;
+using Newtonsoft.Json;
+using Modding.Patches;
 
 namespace HKRL
 {
@@ -14,6 +16,7 @@ namespace HKRL
 		internal static HKRL Instance { get; private set; }
         internal Environments.BasicEnv env = new("ws://localhost:8080");
 		public HKRL() : base("HKRL") { }
+		internal Socket socket = new Socket("ws://localhost:8080");
 
 		public override string GetVersion()
 		{
@@ -30,6 +33,9 @@ namespace HKRL
 
 			ModHooks.HeroUpdateHook += () =>
 			{
+
+				// Log(GameManager.instance.playerData.respawnScene);
+				// Log(GameManager.instance.playerData.respawnMarkerName);
 				if (Input.GetKeyDown(KeyCode.F1))
 				{
                     Log("Starting");
@@ -45,6 +51,17 @@ namespace HKRL
 				{
 					Log("Closing");
 					env.Close();
+				}
+				if (Input.GetKeyDown(KeyCode.F4))
+				{
+					socket.Connect();
+					SaveGameData saveGameData = new SaveGameData(GameManager.instance.playerData, GameManager.instance.sceneData);
+					string text2 = JsonUtility.ToJson(saveGameData);
+					socket.RawSend(text2);
+
+					// Log("Resetting");
+					// env.Reset();
+
 				}
 			};
 

@@ -31,6 +31,11 @@ namespace HKRL.Utils
 			LastMessageSent = data;
 		}
 
+		public void RawSend(string data)
+		{
+			base.Send(data);
+		}
+
 		public void SendAsync(Message data, System.Action<bool> completed)
 		{
 			data.sender = "client";
