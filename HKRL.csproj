@@ -1,0 +1,347 @@
+﻿<!-- Credit to SFGrenade https://github.com/SFGrenade -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>HKRL</RootNamespace>
+    <AssemblyName>HKRL</AssemblyName>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyTitle>HKRL</AssemblyTitle>
+    <Product>HKRL</Product>
+    <Description>PPO in hollow knight</Description>
+    <Copyright>Copyright © </Copyright>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <!-- Path to DLL references required to build mod -->
+    <LocalRefs>F:\GOG Games\Hollow Knight\Hollow Knight_Data\Managed</LocalRefs>
+    <!-- Path to Mods folder -->
+    <ModsPath>$(LocalRefs)/Mods</ModsPath>
+    <!-- The folder that exports will be generated in -->
+    <ExportDir>Output</ExportDir>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <!-- Path to DLL references required to build mod -->
+    <LocalRefs>References</LocalRefs>
+    <!-- The folder that exports will be generated in -->
+    <ExportDir>Output</ExportDir>
+  </PropertyGroup>
+  <Target Condition="'$(Configuration)' == 'Release'" Name="PackageMod" AfterTargets="PostBuildEvent">
+    <RemoveDir Condition="Exists('$(ExportDir)')" Directories="$(ExportDir)" />
+    <MakeDir Directories="$(ExportDir)" />
+    <MakeDir Directories="$(ExportDir)/zip" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ExportDir)" />
+    <Copy Condition="'$(DocumentationFile)' != ''" SourceFiles="ReadMe.md;$(TargetPath);$(TargetDir)/$(TargetName).pdb;$(TargetDir)/$(TargetName).xml" DestinationFolder="$(ExportDir)/zip" />
+    <Copy Condition="'$(DocumentationFile)' == ''" SourceFiles="ReadMe.md;$(TargetPath);$(TargetDir)/$(TargetName).pdb" DestinationFolder="$(ExportDir)/zip/" />
+    <ZipDirectory SourceDirectory="$(ExportDir)/zip" DestinationFile="$(ExportDir)/$(TargetName).zip" />
+    <RemoveDir Directories="$(ExportDir)/zip" />
+    <PropertyGroup>
+      <OutputFileString>$(AssemblyVersion)</OutputFileString>
+    </PropertyGroup>
+    <WriteLinesToFile File="Version.txt" Lines="$(OutputFileString)" Overwrite="true" Encoding="UTF-8" />
+  </Target>
+  <Target Condition="'$(Configuration)' == 'Debug'" Name="CopyMod" AfterTargets="PostBuildEvent">
+    <RemoveDir Condition="Exists('$(ModsPath)/$(TargetName)')" Directories="$(ModsPath)/$(TargetName)" />
+    <MakeDir Directories="$(ModsPath)/$(TargetName)" />
+    <Copy SourceFiles="$(TargetPath);$(TargetDir)/$(TargetName).pdb" DestinationFolder="$(ModsPath)/$(TargetName)" />
+    <!-- Uncomment this if you have the game installed on Steam, Steam is in your PATH environment variable, and you want to run the game upon build. -->
+    <!-- Exec Command="steam steam://rungameid/367520" / -->
+    <Copy SourceFiles="$(TargetDir)/websocket-sharp.dll" DestinationFolder="$(ModsPath)/$(TargetName)" />
+    <Copy SourceFiles="$(TargetDir)/Newtonsoft.Json.dll" DestinationFolder="$(ModsPath)/$(TargetName)" />
+
+  </Target>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(LocalRefs)/Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>$(LocalRefs)/Assembly-CSharp-firstpass.dll</HintPath>
+    </Reference>
+    <Reference Include="GalaxyCSharp">
+      <HintPath>$(LocalRefs)/GalaxyCSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="MMHOOK_Assembly-CSharp">
+      <HintPath>$(LocalRefs)/MMHOOK_Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="MMHOOK_PlayMaker">
+      <HintPath>$(LocalRefs)/MMHOOK_PlayMaker.dll</HintPath>
+    </Reference>
+    <Reference Include="Mono.Cecil">
+      <HintPath>$(LocalRefs)/Mono.Cecil.dll</HintPath>
+    </Reference>
+    <Reference Include="Mono.Security">
+      <HintPath>$(LocalRefs)/Mono.Security.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.RuntimeDetour">
+      <HintPath>$(LocalRefs)/MonoMod.RuntimeDetour.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.Utils">
+      <HintPath>$(LocalRefs)/MonoMod.Utils.dll</HintPath>
+    </Reference>
+    <Reference Include="netstandard">
+      <HintPath>$(LocalRefs)/netstandard.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(LocalRefs)/Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="PlayMaker">
+      <HintPath>$(LocalRefs)/PlayMaker.dll</HintPath>
+    </Reference>
+    <Reference Include="System.ComponentModel.Composition">
+      <HintPath>$(LocalRefs)/System.ComponentModel.Composition.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Configuration">
+      <HintPath>$(LocalRefs)/System.Configuration.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Diagnostics.StackTrace">
+      <HintPath>$(LocalRefs)/System.Diagnostics.StackTrace.dll</HintPath>
+    </Reference>
+    <Reference Include="System.EnterpriseServices">
+      <HintPath>$(LocalRefs)/System.EnterpriseServices.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Globalization.Extensions">
+      <HintPath>$(LocalRefs)/System.Globalization.Extensions.dll</HintPath>
+    </Reference>
+    <Reference Include="System.IO.Compression">
+      <HintPath>$(LocalRefs)/System.IO.Compression.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Net.Http">
+      <HintPath>$(LocalRefs)/System.Net.Http.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.Serialization.Xml">
+      <HintPath>$(LocalRefs)/System.Runtime.Serialization.Xml.dll</HintPath>
+    </Reference>
+    <Reference Include="System.ServiceModel.Internals">
+      <HintPath>$(LocalRefs)/System.ServiceModel.Internals.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Transactions">
+      <HintPath>$(LocalRefs)/System.Transactions.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Xml.XPath.XDocument">
+      <HintPath>$(LocalRefs)/System.Xml.XPath.XDocument.dll</HintPath>
+    </Reference>
+    <Reference Include="Unity.Timeline">
+      <HintPath>$(LocalRefs)/Unity.Timeline.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(LocalRefs)/UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AccessibilityModule">
+      <HintPath>$(LocalRefs)/UnityEngine.AccessibilityModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AIModule">
+      <HintPath>$(LocalRefs)/UnityEngine.AIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AndroidJNIModule">
+      <HintPath>$(LocalRefs)/UnityEngine.AndroidJNIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(LocalRefs)/UnityEngine.AnimationModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ARModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ARModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(LocalRefs)/UnityEngine.AssetBundleModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(LocalRefs)/UnityEngine.AudioModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ClothModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ClothModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ClusterInputModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ClusterInputModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ClusterRendererModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ClusterRendererModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(LocalRefs)/UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CrashReportingModule">
+      <HintPath>$(LocalRefs)/UnityEngine.CrashReportingModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.DirectorModule">
+      <HintPath>$(LocalRefs)/UnityEngine.DirectorModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.DSPGraphModule">
+      <HintPath>$(LocalRefs)/UnityEngine.DSPGraphModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.GameCenterModule">
+      <HintPath>$(LocalRefs)/UnityEngine.GameCenterModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.GIModule">
+      <HintPath>$(LocalRefs)/UnityEngine.GIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.GridModule">
+      <HintPath>$(LocalRefs)/UnityEngine.GridModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.HotReloadModule">
+      <HintPath>$(LocalRefs)/UnityEngine.HotReloadModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ImageConversionModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(LocalRefs)/UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(LocalRefs)/UnityEngine.InputLegacyModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputModule">
+      <HintPath>$(LocalRefs)/UnityEngine.InputModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(LocalRefs)/UnityEngine.JSONSerializeModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.LocalizationModule">
+      <HintPath>$(LocalRefs)/UnityEngine.LocalizationModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ParticleSystemModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.PerformanceReportingModule">
+      <HintPath>$(LocalRefs)/UnityEngine.PerformanceReportingModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.Physics2DModule">
+      <HintPath>$(LocalRefs)/UnityEngine.Physics2DModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(LocalRefs)/UnityEngine.PhysicsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ProfilerModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ProfilerModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.RuntimeInitializeOnLoadManagerInitializerModule">
+      <HintPath>$(LocalRefs)/UnityEngine.RuntimeInitializeOnLoadManagerInitializerModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.ScreenCaptureModule">
+      <HintPath>$(LocalRefs)/UnityEngine.ScreenCaptureModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule">
+      <HintPath>$(LocalRefs)/UnityEngine.SharedInternalsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.SpriteMaskModule">
+      <HintPath>$(LocalRefs)/UnityEngine.SpriteMaskModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.SpriteShapeModule">
+      <HintPath>$(LocalRefs)/UnityEngine.SpriteShapeModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.StreamingModule">
+      <HintPath>$(LocalRefs)/UnityEngine.StreamingModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.SubstanceModule">
+      <HintPath>$(LocalRefs)/UnityEngine.SubstanceModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.SubsystemsModule">
+      <HintPath>$(LocalRefs)/UnityEngine.SubsystemsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.TerrainModule">
+      <HintPath>$(LocalRefs)/UnityEngine.TerrainModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.TerrainPhysicsModule">
+      <HintPath>$(LocalRefs)/UnityEngine.TerrainPhysicsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.TextCoreModule">
+      <HintPath>$(LocalRefs)/UnityEngine.TextCoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(LocalRefs)/UnityEngine.TextRenderingModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.TilemapModule">
+      <HintPath>$(LocalRefs)/UnityEngine.TilemapModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.TLSModule">
+      <HintPath>$(LocalRefs)/UnityEngine.TLSModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(LocalRefs)/UnityEngine.UI.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UIElementsModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UIElementsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UIElementsNativeModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UIElementsNativeModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UmbraModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UmbraModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UNETModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UNETModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityAnalyticsModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityAnalyticsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityConnectModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityConnectModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityCurlModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityCurlModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityTestProtocolModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityTestProtocolModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestAssetBundleModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityWebRequestAssetBundleModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestAudioModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityWebRequestAudioModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityWebRequestModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestTextureModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityWebRequestTextureModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestWWWModule">
+      <HintPath>$(LocalRefs)/UnityEngine.UnityWebRequestWWWModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.VehiclesModule">
+      <HintPath>$(LocalRefs)/UnityEngine.VehiclesModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.VFXModule">
+      <HintPath>$(LocalRefs)/UnityEngine.VFXModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.VideoModule">
+      <HintPath>$(LocalRefs)/UnityEngine.VideoModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.VirtualTexturingModule">
+      <HintPath>$(LocalRefs)/UnityEngine.VirtualTexturingModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.VRModule">
+      <HintPath>$(LocalRefs)/UnityEngine.VRModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.WindModule">
+      <HintPath>$(LocalRefs)/UnityEngine.WindModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.XRModule">
+      <HintPath>$(LocalRefs)/UnityEngine.XRModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include=".gitignore" />
+    <None Include="ReadMe.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WebSocketSharp" Version="1.0.3-rc11" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>
