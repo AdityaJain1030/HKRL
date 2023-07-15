@@ -17,7 +17,7 @@ namespace HKRL.Environments
 
 		protected void Connect () {
 			socket.Connect();
-			HKRL.Instance.Log("Connected to server");
+			// HKRL.Instance.Log("Connected to server");
 		}
 
 		protected abstract IEnumerator Setup();

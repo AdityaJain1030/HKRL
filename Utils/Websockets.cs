@@ -52,10 +52,6 @@ namespace HKRL.Utils
 			public WaitForMessage(Socket socket)
 			{
 				this.socket = socket;
-				this.socket.OnMessage += (sender, e) =>
-				{
-					wait = false;
-				};
 			}
 			public override bool keepWaiting
 			{

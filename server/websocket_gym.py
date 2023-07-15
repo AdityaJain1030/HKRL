@@ -57,7 +57,7 @@ class WebsocketEnv:
 
 	async def reset(self):
 		await self._wait_for_connection()
-		message = await self.sendMessage('init',  {
+		message = await self.sendMessage('reset',  {
 			'state_size': self.obs_size,
 			'action_size': self.action_size - 1
 ,

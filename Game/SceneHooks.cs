@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 
@@ -63,14 +64,44 @@ namespace HKRL.Game
 
 		public static bool ResetBossHealthAfterThreshold(On.HealthManager.orig_TakeDamage orig, HealthManager self, HitInstance hitInstance, int threshold, int resetTo)
 		{
-            bool wouldDie = false;
-            if (self.hp - hitInstance.DamageDealt <= 50)
-            {
-                self.hp = resetTo;
-                wouldDie = true;
-            }
-            orig(self, hitInstance);
-            return wouldDie;
+			bool wouldDie = false;
+			if (self.hp - hitInstance.DamageDealt <= 50)
+			{
+				self.hp = resetTo;
+				wouldDie = true;
+			}
+			return wouldDie;
+		}
+
+		public class WaitForSceneLoad : CustomYieldInstruction, IDisposable
+		{
+			private bool sceneLoaded = false;
+			private string sceneName;
+			public WaitForSceneLoad(string sn)
+			{
+				// On.HeroController.Awake += OnSceneEntered;
+				sceneName = sn;
+				UnityEngine.SceneManagement.SceneManager.activeSceneChanged += OnSceneEntered;
+			}
+			public void OnSceneEntered(UnityEngine.SceneManagement.Scene _, UnityEngine.SceneManagement.Scene scene)
+			{
+				if (scene.name == sceneName)
+					{
+						sceneLoaded = true;
+					}
+			}
+			public override bool keepWaiting
+			{
+				get
+				{
+					return UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != sceneName;
+				}
+			}
+
+			public void Dispose()
+			{
+				UnityEngine.SceneManagement.SceneManager.activeSceneChanged -= OnSceneEntered;
+			}
 		}
 	}
 }

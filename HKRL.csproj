@@ -344,4 +344,7 @@
     <PackageReference Include="WebSocketSharp" Version="1.0.3-rc11" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resource\save_file.json" />
+  </ItemGroup>
 </Project>

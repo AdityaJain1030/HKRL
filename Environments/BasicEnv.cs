@@ -36,8 +36,8 @@ namespace HKRL.Environments
 				case "action":
 					yield return Step(message.data);
 					break;
-				case "init":
-					yield return Init(message.data);
+				case "reset":
+					yield return Reset(message.data);
 					break;
 				case "pause":
 					yield return Pause(message.data);
@@ -73,7 +73,7 @@ namespace HKRL.Environments
 			yield break;
 		}
 
-		private IEnumerator Init(MessageData data)
+		private IEnumerator Reset(MessageData data)
 		{
 			ObservationSize = (data.state_size[0], data.state_size[1]);
 			ActionSize = data.action_size.Value;
@@ -93,7 +93,7 @@ namespace HKRL.Environments
 
 			SendMessage(new Message
 			{
-				type = "init",
+				type = "reset",
 				data = data
 			});
 
@@ -110,6 +110,7 @@ namespace HKRL.Environments
 		{
 			damageDoneInStep += hitInstance.DamageDealt;
 			bossWouldDieInStep = SceneHooks.ResetBossHealthAfterThreshold(orig, self, hitInstance, 50, 800);
+		    orig(self, hitInstance);
 		}
 
 		private IEnumerator LoadLevel(string level)

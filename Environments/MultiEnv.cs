@@ -24,13 +24,6 @@ namespace HKRL.Environments
 
 		public MultiEnv(string url, params string[] protocols) : base(url, protocols)
 		{
-			Connect();
-			// yield return new Utils.Socket.WaitForMessage(socket);
-			var message = socket.UnreadMessages.Dequeue();
-			if (message.type == "load")
-			{
-
-			}
 
 		}
 
@@ -44,8 +37,8 @@ namespace HKRL.Environments
 				case "action":
 					yield return Step(message.data);
 					break;
-				case "init":
-					yield return Init(message.data);
+				case "reset":
+					yield return Reset(message.data);
 					break;
 				case "pause":
 					yield return Pause(message.data);
@@ -81,7 +74,7 @@ namespace HKRL.Environments
 			yield break;
 		}
 
-		private IEnumerator Init(MessageData data)
+		private IEnumerator Reset(MessageData data)
 		{
 			ObservationSize = (data.state_size[0], data.state_size[1]);
 			ActionSize = data.action_size.Value;
@@ -101,7 +94,7 @@ namespace HKRL.Environments
 
 			SendMessage(new Message
 			{
-				type = "init",
+				type = "reset",
 				data = data
 			});
 
@@ -118,11 +111,7 @@ namespace HKRL.Environments
 		{
 			damageDoneInStep += hitInstance.DamageDealt;
 			bossWouldDieInStep = SceneHooks.ResetBossHealthAfterThreshold(orig, self, hitInstance, 50, 800);
-		}
-
-		private IEnumerator LoadLevel(string level)
-		{
-			yield break;
+			orig(self, hitInstance);
 		}
 
 		private Image GetObservation()
@@ -141,7 +130,6 @@ namespace HKRL.Environments
 			image = image.ResizeNearestNeighbor(ObservationSize.Item1, ObservationSize.Item2);
 			return image;
 		}
-
 
 
 		private IEnumerator Step(MessageData data)
@@ -172,9 +160,30 @@ namespace HKRL.Environments
 
 		protected override IEnumerator Setup()
 		{
+			Connect();
+			yield return new Utils.Socket.WaitForMessage(socket);
+			Message message = socket.UnreadMessages.Dequeue();
+			// yield return OnMessage(message);
+			if (message.type != "init")
+			{
+				yield return Setup();
+				yield break;
+
+			}
+			On.GameManager.SaveGame += Game.SaveFileProxy.DisableSaveGame;
+			Game.SaveFileProxy.LoadCompletedSave();
+			// yield return new WaitForSeconds(5f);
+			GameManager.instance.ContinueGame();
+			yield return new Game.SceneHooks.WaitForSceneLoad("GG_Workshop"); 
+			// yield return new Game.SceneHooks.WaitForSceneLoad("GG_Workshop"); 
+			yield return new WaitForFinishedEnteringScene();
+			yield return new WaitForSeconds(2f); // Workaround till I find a better solution 
+			// HKRL.Instance.Log("Level loaded");
+
 			hitboxReaderHook.Load();
 			InputManager.AttachDevice(inputDeviceShim);
-			yield break;
+			SendMessage(message);
+			// yield break;
 		}
 
 		protected override IEnumerator Dispose()

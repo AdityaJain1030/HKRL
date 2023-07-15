@@ -3,54 +3,154 @@ import websockets
 import asyncio
 import json
 import collections
-
+import numpy as np
+import cv2
 
 class MultiEnv:
-    def __init__(self, n_env=4, render_colored=False, observation_size=(100, 57), action_size=81, frames_per_wait=5, server_ip="localhost", server_port='8080', time_scale=1, level="GG_Hornet_1", hk_data_dir="Hollow Knight_Data", hk_path="F:\GOG Games\Hollow Knight", hk_save_dir="C:\\Users\\adity\\AppData\\LocalLow\\Team Cherry\\Hollow Knight"):
-        self.n_env = n_env
-        self.server_ip = server_ip
-        self.server_port = server_port
-        self.obs_size = observation_size
-        self.action_size = action_size
-        self.frame_delay = frames_per_wait
-        self.time_scale = time_scale
-        self.level = level
+	def __init__(self, n_env=4, render_colored=False, observation_size=(100, 57), action_size=81, frames_per_wait=5, server_ip="localhost", server_port='8080', time_scale=1, level="GG_Hornet_1", hk_data_dir="Hollow Knight_Data", hk_path="F:\GOG Games\Hollow Knight", hk_save_dir="C:\\Users\\adity\\AppData\\LocalLow\\Team Cherry\\Hollow Knight"):
+		self.n_env = n_env
+		self.server_ip = server_ip
+		self.server_port = server_port
+		self.obs_size = observation_size
+		self.action_size = action_size
+		self.frame_delay = frames_per_wait
+		self.time_scale = time_scale
+		self.level = level
 
-        self.render_mode = 'human'
-        self.messageQueue = [collections.deque() for _ in range(self.n_env)]
-        self.websockets = [None for _ in range(self.n_env)]
-        self.connected = [asyncio.Event() for _ in range(self.n_env)]
-        self.augment_images = render_colored
+		self.render_mode = 'human'
+		self.websockets = [None for _ in range(self.n_env)]
+		self.connected = [asyncio.Event() for _ in range(self.n_env)]
+		self.augment_images = render_colored
 
-        # self.ws_task = asyncio.create_task(self._start_server())
+		# Hollow Knight specific
+		self.data_dir = hk_data_dir
+		self.hk_path = hk_path
+		# self.save_dir = hk_save_dir
 
-        # Hollow Knight specific
-        self.data_dir = hk_data_dir
-        self.hk_path = hk_path
-        # self.save_dir = hk_save_dir
+		self.instance_manager = mim.MultiInstanceManager(
+			self.hk_path, self.data_dir)
 
-        self.instance_manager = mim.MultiInstanceManager(
-            self.hk_path, self.data_dir)
+		# self.instance_manager.hide_old_saves()
+		# for i in range(self.n_env):
+		#     self.instance_manager.copy_save(
+		#         'F:\\Downloads\\Hollow Knight Mods\\HKRL\\SaveFiles\\user4.dat', i + 1)
 
-        # self.instance_manager.hide_old_saves()
-        # for i in range(self.n_env):
-        #     self.instance_manager.copy_save(
-        #         'F:\\Downloads\\Hollow Knight Mods\\HKRL\\SaveFiles\\user4.dat', i + 1)
-            
-        self.instance_manager.spawn_n(self.n_env)
-        self.instance_manager.start_all()
+		self.ws_task = asyncio.create_task(self._start_server())
 
-    async def _start_server(self):
-        await websockets.serve(self._on_connect, self.server_ip, self.server_port)
+		self.instance_manager.spawn_n(self.n_env)
+		self.instance_manager.start_all()
 
-    def close(self):
-        self.instance_manager.kill_all()
-        self.instance_manager.destroy_all()
-        # self.instance_manager.restore_old_saves("recent")
+	async def _start_server(self):
+		await websockets.serve(self._on_connect, self.server_ip, self.server_port)
 
-    # async def _on_connect(self, websocket, path):
+	async def _on_connect(self, websocket, path):
+		print("Connected to client")
+		self.websockets[self.websockets.index(None)] = websocket
 
+		self.connected[self.websockets.index(websocket)].set()
+		await asyncio.Future()
 
-env = MultiEnv()
-wait = input("Press enter to continue")
-env.close()
+	def _cleanup_connection(self, env_id):
+		self.websockets[env_id]
+		self.connected[env_id].clear()
+
+	async def close(self):
+		for i in self.websockets:
+			if i is not None:
+				await i.close()
+		self.ws_task.cancel()
+		self.connected.clear()
+		self.instance_manager.kill_all()
+		self.instance_manager.destroy_all()
+
+	async def sendMessage(self, type, data, env_id):
+		message = json.dumps({'type': type, 'data': data, 'sender': 'server'})
+		try:
+			await self.websockets[env_id].send(message)
+			message = await self.websockets[env_id].recv()
+			return message
+		except websockets.exceptions.ConnectionClosed:
+			print("Connection closed")
+			self._cleanup_connection(env_id)
+			return None
+
+	async def reset(self, env_id):
+		await self.connected[env_id].wait()
+		message = message = await self.sendMessage('reset',  {
+			'state_size': self.obs_size,
+			'action_size': self.action_size - 1,
+			'level': self.level,
+			'frames_per_wait': self.frame_delay,
+			'time_scale': self.time_scale
+		}, env_id)
+		if message is None:
+			return None
+		message = json.loads(message)
+		
+		if self.augment_images:
+			obs = np.asarray([self.cvtclr(i) for i in message['data']['state']], dtype=np.uint8)
+			obs = obs.reshape((self.obs_size[0], self.obs_size[1], 3))
+		else:
+			obs = np.asarray(message['data']['state'], dtype=np.float16)
+			obs = obs.reshape(self.obs_size[0], self.obs_size[1])
+			obs /= 4
+
+		obs = np.rot90(obs)
+
+		return obs
+	
+	async def step(self, action, env_id):
+		await self.connected[env_id].wait()
+		message = await self.sendMessage('action', {'action': action}, env_id)
+		if message is None:
+			return None, None, None, None
+		
+		message = json.loads(message)
+		if self.augment_images:
+			obs = np.asarray([self.cvtclr(i) for i in message['data']['state']], dtype=np.uint8)
+			obs = obs.reshape((self.obs_size[0], self.obs_size[1], 3))
+		else:
+			obs = np.asarray(message['data']['state'], dtype=np.float16)
+			obs = obs.reshape(self.obs_size[0], self.obs_size[1])
+			obs /= 4
+
+		obs = np.rot90(obs)
+
+		return obs, message['data']['reward'], message['data']['done'], message['data']['info']
+
+	async def pause(self, env_id):
+		await self.connected[env_id].wait()
+		message = await self.sendMessage('pause', {}, env_id)
+		if message is None:
+			return None
+		return True
+	
+	def cvtclr(self, num):
+		if num == 0:
+			return (0, 0, 0)
+		elif num == 1:
+			return (255, 0, 0)
+		elif num == 2:
+			return (0, 255, 0)
+		elif num == 3:
+			return (0, 0, 255)
+		elif num == 4:
+			return (255, 255, 255)
+	
+	async def resume(self, env_id):
+		await self.connected[env_id].wait()
+		message = await self.sendMessage('resume', {}, env_id)
+		if message is None:
+			return None
+		return True
+
+	async def loadAll(self):
+		loaded = await asyncio.gather(*[self.load(i) for i in range(self.n_env)])
+		return loaded
+	
+	async def load(self, env_id):
+		await self.connected[env_id].wait()
+		message = await self.sendMessage('init', {}, env_id)
+		if message is None:
+			return None
+		return True

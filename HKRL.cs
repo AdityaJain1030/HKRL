@@ -8,13 +8,16 @@ using UObject = UnityEngine.Object;
 using HKRL.Utils;
 using Newtonsoft.Json;
 using Modding.Patches;
+using UnityEngine.SceneManagement;
+
 
 namespace HKRL
 {
 	internal class HKRL : Mod
 	{
 		internal static HKRL Instance { get; private set; }
-        internal Environments.BasicEnv env = new("ws://localhost:8080");
+		internal Environments.BasicEnv env = new("ws://localhost:8090");
+		internal Environments.MultiEnv mEnv = new("ws://localhost:8080");
 		public HKRL() : base("HKRL") { }
 		internal Socket socket = new Socket("ws://localhost:8080");
 
@@ -31,6 +34,9 @@ namespace HKRL
 
 			Log("Initialized");
 
+
+			mEnv.Start();
+
 			ModHooks.HeroUpdateHook += () =>
 			{
 
@@ -38,9 +44,9 @@ namespace HKRL
 				// Log(GameManager.instance.playerData.respawnMarkerName);
 				if (Input.GetKeyDown(KeyCode.F1))
 				{
-                    Log("Starting");
+					Log("Starting");
 					env.Start();
-                    
+
 				}
 				if (Input.GetKeyDown(KeyCode.F2))
 				{
@@ -51,7 +57,7 @@ namespace HKRL
 				{
 					Log("Closing");
 					env.Close();
-				}
+				} 
 				if (Input.GetKeyDown(KeyCode.F4))
 				{
 					socket.Connect();
