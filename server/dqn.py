@@ -22,18 +22,20 @@ class DQN(nn.Module, ABC):
 		self.lr = lr
 
 		# self.input_layer = 
+		self.head = self.get_head()
+		print(obs_size)
 		with torch.no_grad():
-			out_size = self.input_layer(torch.zeros(1, *obs_size)).numel()
+			out_size = self.head(torch.zeros(1, *obs_size)).numel()
 		
 		self.actions_head = nn.Sequential(
 			nn.Linear(out_size, 128),
 			nn.ReLU(),
 			nn.Linear(128, 128),
 			nn.ReLU(),
-			nn.Linear(128, act_size)
+			nn.Linear(128, act_size[0])
 		)
 		self.Q = nn.Sequential(
-			self.input_layer,
+			self.head,
 			self.actions_head
 		)
 
@@ -47,7 +49,7 @@ class DQN(nn.Module, ABC):
 	
 	@property
 	@abstractmethod
-	def input_layer(self) -> nn.Module:
+	def get_head(self) -> nn.Module:
 		pass
 
 	def forward(self, x):
@@ -55,11 +57,9 @@ class DQN(nn.Module, ABC):
 	
 	def get_actions(self, obs, eplison=0):
 		if random.random() > eplison:
-			obs = torch.from_numpy(obs).float()
-
-			act_vals = self.Q(obs).unsqueeze(0)
-			action = act_vals.max(dim=1)[1].detach().numpy()
-
+			obs = torch.from_numpy(obs.copy()).float().unsqueeze(0)
+			act_vals = self.Q(obs)
+			action = act_vals.max(dim=1)[1].detach().tolist()
 			return action
 		else:
 			return [random.randint(0, self.act_size[0] - 1) for _ in range(obs.shape[0])]
@@ -88,11 +88,11 @@ class DQN(nn.Module, ABC):
 	
 	def train(self, obs, action, reward, next_obs, done):
 
-		obs = torch.from_numpy(obs).float()
-		next_obs = torch.from_numpy(next_obs).float()
-		action = torch.tensor(action).long()
-		reward = torch.tensor(reward).long()
-		done = torch.tensor(done).long()
+		obs = torch.from_numpy(obs.copy()).float()
+		next_obs = torch.from_numpy(next_obs.copy()).float()
+		action = torch.tensor(action.copy()).long()
+		reward = torch.tensor(reward.copy()).long()
+		done = torch.tensor(done.copy()).long()
 
 
 		with torch.no_grad():

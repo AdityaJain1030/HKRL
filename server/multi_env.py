@@ -94,6 +94,7 @@ class MultiEnv:
 			obs = np.asarray(message['data']['state'], dtype=np.float16)
 			obs = obs.reshape(self.obs_size[0], self.obs_size[1])
 			obs /= 4
+			obs *= 255
 
 		obs = np.rot90(obs)
 
@@ -113,6 +114,7 @@ class MultiEnv:
 			obs = np.asarray(message['data']['state'], dtype=np.float16)
 			obs = obs.reshape(self.obs_size[0], self.obs_size[1])
 			obs /= 4
+			obs *= 255
 
 		obs = np.rot90(obs)
 

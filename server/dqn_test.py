@@ -34,7 +34,7 @@ def main(
 		final_eplison=0.05,
 		e_greedy_frames=20000 * 2500,
 		lr=0.0001,
-		gamma=0.99,
+		gamma=0.9995,
 		training_episodes=5000,
 		hardsync_target_every=10,
 		gradient_updates_per_update=1,
