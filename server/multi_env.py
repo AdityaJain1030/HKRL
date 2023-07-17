@@ -61,7 +61,7 @@ class MultiEnv:
 		self.ws_task.cancel()
 		self.connected.clear()
 		self.instance_manager.kill_all()
-		self.instance_manager.destroy_all()
+		# self.instance_manager.destroy_all()
 
 	async def sendMessage(self, type, data, env_id):
 		message = json.dumps({'type': type, 'data': data, 'sender': 'server'})
@@ -145,6 +145,9 @@ class MultiEnv:
 		return True
 
 	async def loadAll(self):
+		# loaded = []
+		# for i in range(self.n_env):
+		# 	loaded.append(await self.load(i))
 		loaded = await asyncio.gather(*[self.load(i) for i in range(self.n_env)])
 		return loaded
 	

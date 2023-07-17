@@ -7,7 +7,7 @@ import torch
 import random
 import asyncio
 
-envs = 8
+envs = 10
 
 async def main():
 	# print([i for i in range(1)])

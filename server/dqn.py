@@ -3,123 +3,105 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+from abc import ABC, abstractmethod
+
 import numpy as np
 import copy
 from collections import deque
 import random
 
-class DQN(nn.Module):
-	def __init__(self, obs_size, act_size, use_pooling = False, learning_rate = 0.0001, gamma = 0.99, replay_buffer_size = 1000000, model_params = None):
+class DQN(nn.Module, ABC):
+	def __init__(self, obs_size, act_size, lr=0.0001, gamma=0.99, replay_buffer_size = 1000000, model_params = None):
 		super(DQN, self).__init__()
+
 		self.obs_size = obs_size
-		self.channels = obs_size[0]
-		self.use_pooling = use_pooling
-
-		# move to training loop
-		# self.eplison_i = initial_eplison
-		# self.eplison_f = final_eplison
-		# self.eplison_decay = eplison_decay_per_timestep
-
-		self.alpha = learning_rate
-		self.gamma = gamma
-
+		self.act_size = act_size
 		self.memory = deque(maxlen=replay_buffer_size)
 
-		# move to training loop
-		# self.steps_per_update = steps_per_update
-		# self.steps_per_target_update = steps_per_target_update
-		# self.learning_starts = learning_starts
-		# self.batch_size = batch_size
+		self.gamma = gamma
+		self.lr = lr
 
-		self.replay_buffer_size = replay_buffer_size
+		# self.input_layer = 
+		with torch.no_grad():
+			out_size = self.input_layer(torch.zeros(1, *obs_size)).numel()
+		
+		self.actions_head = nn.Sequential(
+			nn.Linear(out_size, 128),
+			nn.ReLU(),
+			nn.Linear(128, 128),
+			nn.ReLU(),
+			nn.Linear(128, act_size)
+		)
+		self.Q = nn.Sequential(
+			self.input_layer,
+			self.actions_head
+		)
 
 		if model_params is not None:
 			self.load_state_dict(model_params)
 
-		if self.use_pooling:
-			self.cnn = nn.Sequential(
-				nn.Conv2d(self.channels, 32, kernel_size=8, stride=4, padding=2),
-				nn.ReLU(),
-				nn.MaxPool2d(kernel_size=2, stride=2),
-				nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
-				nn.ReLU(),
-				nn.MaxPool2d(kernel_size=2, stride=2),
-				nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-				nn.ReLU(), 
-				nn.MaxPool2d(kernel_size=2, stride=2),
-				nn.Flatten(),
-			)
-		else:
-			self.cnn = nn.Sequential(
-				nn.Conv2d(self.channels, 32, kernel_size=8, stride=4, padding=2),
-				nn.ReLU(),
-				nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
-				nn.ReLU(),
-				nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-				nn.ReLU(),
-				nn.Flatten(),
-			)
-
-		# conv_output_size = self.conv_output_dim()
-
-		self.linear = nn.Sequential(nn.Linear(64 * 10 * 10, 512), nn.ReLU(), nn.Linear(512, act_size))
-
-		self.Q = nn.Sequential(self.cnn, self.linear)
 		self.target = copy.deepcopy(self.Q)
 
-		self.optimizer = optim.Adam(self.parameters(), lr=self.alpha)
+		self.optimizer = optim.Adam(self.Q.parameters(), lr=lr)
+
+	
+	@property
+	@abstractmethod
+	def input_layer(self) -> nn.Module:
+		pass
 
 	def forward(self, x):
-		x = self.Q(x)
-		return x
+		return self.Q(x)
 	
-	def synchronize_target(self, polyak_coefficent = 1.0):
-		for target_param, param in zip(self.target.parameters(), self.Q.parameters()):
-			target_param.data.copy_(polyak_coefficent*param.data + target_param.data*(1.0 - polyak_coefficent))
+	def get_actions(self, obs, eplison=0):
+		if random.random() > eplison:
+			obs = torch.from_numpy(obs).float()
 
-	def get_action(self, obs):
-		with torch.no_grad():
-			obs = torch.as_tensor(obs).float().unsqueeze(0)
-			return self.Q(obs).max(dim=1)[1].item()
+			act_vals = self.Q(obs).unsqueeze(0)
+			action = act_vals.max(dim=1)[1].detach().numpy()
+
+			return action
+		else:
+			return [random.randint(0, self.act_size[0] - 1) for _ in range(obs.shape[0])]
+		
 	
-	def update(self, obs, act, rew, obs_next, done):
-		obs = torch.as_tensor(obs).float()
-		act = torch.as_tensor(act).long()
-		rew = torch.as_tensor(rew).float()
-		obs_next = torch.as_tensor(obs_next).float()
-		done = torch.as_tensor(done).float()
+	def synchronize_target(self, polyak=None):
+		if polyak is not None:
+			for target_param, param in zip(self.target.parameters(), self.Q.parameters()):
+				target_param.data.copy_(polyak * param.data + (1 - polyak) * target_param.data)
+		else:
+			self.target.load_state_dict(self.Q.state_dict())
 
-		# compute loss
-		# Torch.no_grad to avoid updating target networks with autograd
+	def save(self, path):
+		torch.save(self.state_dict(), path)
+
+	def load(self, path):
+		self.load_state_dict(torch.load(path))
+
+	def save_replay(self, obs, action, reward, next_obs, done):
+		self.memory.append((obs, action, reward, next_obs, done))
+
+	def sample_replay(self, batch_size):
+		batch = random.sample(self.buffer, min(batch_size, len(self.buffer)))
+		obs, act, rew, obs_next, done = map(np.stack, zip(*batch))
+		return obs, act, rew, obs_next, done
+	
+	def train(self, obs, action, reward, next_obs, done):
+
+		obs = torch.from_numpy(obs).float()
+		next_obs = torch.from_numpy(next_obs).float()
+		action = torch.tensor(action).long()
+		reward = torch.tensor(reward).long()
+		done = torch.tensor(done).long()
+
+
 		with torch.no_grad():
-			max_future_q = self.target(obs_next).max(dim=1)[0]
-			target_q = rew + (1 - done) * self.gamma * max_future_q
+			target = reward + self.gamma * self.target(next_obs).max(dim=1)[0] * (1 - done)
 
-		# get current q values
-		current_q = self.Q(obs)[0, act]
-
-		loss = F.mse_loss(current_q, target_q)
-
-		# update
+		pred = self.Q(obs).gather(1, action.unsqueeze(1)).squeeze(1)
+		loss = F.mse_loss(pred, target)
 		self.optimizer.zero_grad()
 		loss.backward()
 		self.optimizer.step()
 
-		return loss
-	
-	def save_experience(self, obs, act, rew, obs_next, done):
-		self.memory.append((obs, act, rew, obs_next, done))
-
-	def sample_experience(self, batch_size):
-		batch = random.sample(self.memory, min(batch_size, len(self.memory)))
-		obs, act, rew, obs_next, done = map(np.stack, zip(*batch))
-		return obs, act, rew, obs_next, done		
-	
-
-
-	
-
-	
-
-	
-
+		return loss.item()

@@ -4,7 +4,7 @@ import shutil
 import subprocess
 import psutil
 
-
+# Inspiration from 
 class MultiInstanceManager:
 	def __init__(self, hollow_knight_dir, data_dir):
 		self.root = hollow_knight_dir
