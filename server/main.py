@@ -152,23 +152,46 @@ async def main(
 	env.close()
 
 
+async def eval(model, time_scale=1, frames_per_wait=5):
+	env = await make_env(timescale=time_scale, frames_per_wait=frames_per_wait)
+
+	obs = await env.reset(0)
+	obs = preprocess(obs)
+	agent_linear = CnnDQN(
+		(1, env.obs_size[0], env.obs_size[1]), (env.action_size,), lr=0.0001, gamma=.995)
+	
+	agent_linear.load(model)
+	
+	done = False
+	total_rew = 0
+	while not done:
+		action = agent_linear.get_actions(obs, 0.05)
+		next_obs, reward, done, _ = await env.step(action[0], 0)
+		next_obs = preprocess(next_obs)
+		obs = next_obs
+		total_rew += reward
+		print("reward: ", reward, "total_rew: ", total_rew)
+	await env.close()
+
 # Adapted atari hyperparams 
-asyncio.run(main(
-	log_path="./logs/hollow_knight/mossbag" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
-	train_every=4,
-	train_timesteps=1000000,
-	update_target_every=1000,
-	learning_starts=100000,
-	e_greedy_steps=100000,
-	save_every=50000,
-	max_timesteps=5000, #half of atari b/c enemies seem to disappear after a while
-	buffer_size=500000,
-	gamma=0.995,
-	time_scale=5,
-	frames_per_wait=1,
-	batch_size=32,
-	lr=0.0001,
-	# load_model="./models/hollow_knight/mossbag_cnn60000.pt",
-	save_path="./models/hollow_knight/mossbag2",
-	# init_eplison=0.65, #start from pretrained model
-	))
+# asyncio.run(main(
+# 	log_path="./logs/hollow_knight/mossbag" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
+# 	train_every=4,
+# 	train_timesteps=1000000,
+# 	update_target_every=1000,
+# 	learning_starts=100000,
+# 	e_greedy_steps=100000,
+# 	save_every=50000,
+# 	max_timesteps=5000, #half of atari b/c enemies seem to disappear after a while
+# 	buffer_size=500000,
+# 	gamma=0.995,
+# 	time_scale=3,
+# 	frames_per_wait=2,
+# 	batch_size=32,
+# 	lr=0.0001,
+# 	load_model="./models/hollow_knight/mossbag3_cnn60000.pt",
+# 	save_path="./models/hollow_knight/mossbag4",
+# 	init_eplison=0.06, #start from pretrained model
+# 	))
+
+# asyncio.run(eval("./models/hollow_knight/mossbag3_cnn200000.pt"))
