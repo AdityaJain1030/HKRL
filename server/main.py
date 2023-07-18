@@ -112,9 +112,11 @@ async def main(
 		if t > learning_starts:
 			if t % train_every == 0:
 				await env.pause(0)
-				s, a, r, s_n, d, _ = buffer.sample(batch_size * train_every)
-				# if t > buffer_size:
-				# 	i = [age + t for age in i]
+				s, a, r, s_n, d, i = buffer.sample(batch_size)
+				if t > buffer_size:
+					i = [age + t for age in i]
+
+				ep_sample_age.extend(i)
 
 				loss = agent_linear.train(s, a, r, s_n, d)
 				ep_loss.append(loss)
@@ -132,13 +134,13 @@ async def main(
 		if ep_len > max_timesteps:
 			obs = await env.reset(0)
 			obs = preprocess(obs)
-			print("episode: ", episode, "ep_len: ", ep_len, "ep_reward: ", np.sum(ep_reward), "avg_loss: ", np.mean(ep_loss), "eplison: ", eplison)
+			print("episode: ", episode, "ep_len: ", ep_len, "ep_reward: ", sum(ep_reward), "avg_loss: ", np.mean(ep_loss), "eplison: ", eplison)
 			logger.log_scalar("ep_len", ep_len, episode)
 			logger.log_scalar("total_rew", np.sum(ep_reward), episode)
 			logger.log_scalar("avg_loss", np.mean(ep_loss), episode)
 			logger.log_scalar("eplison", eplison, episode)
 			# logger.log_barplot("ep_actions", action_list, ep_actions, episode)
-			# logger.log_scalar("avg_sample_age", np.mean(ep_sample_age), episode)
+			logger.log_scalar("avg_sample_age", np.mean(ep_sample_age), episode)
 
 			ep_len = 0
 			ep_reward = []
@@ -150,19 +152,23 @@ async def main(
 	env.close()
 
 
+# Adapted atari hyperparams 
 asyncio.run(main(
 	log_path="./logs/hollow_knight/mossbag" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
-	train_every=50,
-	train_timesteps=300000,
-	update_target_every=200,
-	learning_starts=50000,
-	e_greedy_steps=150000,
-	save_every=30000,
-	max_timesteps=10000,
-	buffer_size=100000,
-	gamma=0.9995,
-	time_scale=3,
-	frames_per_wait=2,
-	load_model="./models/pong_cnn150000.pt",
-	init_eplison=0.65, #start from pretrained model
+	train_every=4,
+	train_timesteps=1000000,
+	update_target_every=1000,
+	learning_starts=100000,
+	e_greedy_steps=100000,
+	save_every=50000,
+	max_timesteps=5000, #half of atari b/c enemies seem to disappear after a while
+	buffer_size=500000,
+	gamma=0.995,
+	time_scale=5,
+	frames_per_wait=1,
+	batch_size=32,
+	lr=0.0001,
+	# load_model="./models/hollow_knight/mossbag_cnn60000.pt",
+	save_path="./models/hollow_knight/mossbag2",
+	# init_eplison=0.65, #start from pretrained model
 	))

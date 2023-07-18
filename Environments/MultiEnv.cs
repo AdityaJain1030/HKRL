@@ -85,6 +85,9 @@ namespace HKRL.Environments
 
 			// yield return LoadLevel(Level);
 			yield return SceneHooks.LoadBossScene(Level);
+			ModHooks.AfterTakeDamageHook -= SetZeroDamage;
+			On.HealthManager.TakeDamage -= SetHitsDealtInStep;
+
 			ModHooks.AfterTakeDamageHook += SetZeroDamage;
 			On.HealthManager.TakeDamage += SetHitsDealtInStep;
 			timeManager = new(TimeScale);
@@ -139,7 +142,7 @@ namespace HKRL.Environments
 			{
 				yield return null;
 			}
-			data.reward = (damageDoneInStep / 4) - (50 * hitsTakenInStep);
+			data.reward = (damageDoneInStep / 4) - (10 * hitsTakenInStep);
 			data.done = bossWouldDieInStep;
 			// inputDeviceShim.Reset();
 			Image observation = GetObservation();

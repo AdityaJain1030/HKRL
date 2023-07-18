@@ -11,7 +11,7 @@ from collections import deque
 import random
 
 class DQN(nn.Module, ABC):
-	def __init__(self, obs_size, act_size, lr=0.0001, gamma=0.99, replay_buffer_size = 1000000, model_params = None):
+	def __init__(self, obs_size, act_size, lr=0.0001, gamma=0.99, replay_buffer_size = 1000000, clip = 1, model_params = None):
 		super(DQN, self).__init__()
 
 		self.obs_size = obs_size
@@ -20,6 +20,7 @@ class DQN(nn.Module, ABC):
 
 		self.gamma = gamma
 		self.lr = lr
+		self.clip = clip
 
 		# self.input_layer = 
 		self.head = self.get_head()
@@ -77,6 +78,7 @@ class DQN(nn.Module, ABC):
 
 	def load(self, path):
 		self.load_state_dict(torch.load(path))
+		self.synchronize_target()
 
 	def save_replay(self, obs, action, reward, next_obs, done):
 		self.memory.append((obs, action, reward, next_obs, done))
@@ -102,6 +104,8 @@ class DQN(nn.Module, ABC):
 		loss = F.mse_loss(pred, target)
 		self.optimizer.zero_grad()
 		loss.backward()
+
+		nn.utils.clip_grad_norm_(self.Q.parameters(), self.clip)
 		self.optimizer.step()
 
 		return loss.item()
