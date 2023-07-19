@@ -88,5 +88,6 @@ namespace HKRL.Utils
 		public int? enemy_health;
 		public int? soul_level;
 		public int? time_scale;
+		public bool? frame_stack;
 	}
 }

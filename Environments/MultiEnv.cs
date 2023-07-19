@@ -17,7 +17,9 @@ namespace HKRL.Environments
 		private int damageDoneInStep = 0;
 		private bool bossWouldDieInStep = false;
 		public int frameSkipCount;
+		public bool FrameStack;
 		public int TimeScale = 1;
+		public int[] FrameStackBuffer;
 		private HitboxReaderHook hitboxReaderHook = new();
 		private Game.InputDeviceShim inputDeviceShim = new();
 		private TimeScale timeManager;
@@ -81,6 +83,7 @@ namespace HKRL.Environments
 			Level = data.level;
 			frameSkipCount = data.frames_per_wait.Value;
 			TimeScale = data.time_scale.Value;
+			FrameStack = data.frame_stack.Value;
 			
 
 			// yield return LoadLevel(Level);
