@@ -58,7 +58,7 @@ class DQN(nn.Module, ABC):
 	
 	def get_actions(self, obs, eplison=0):
 		if random.random() > eplison:
-			obs = torch.from_numpy(obs.copy()).float().unsqueeze(0)
+			obs = torch.from_numpy(obs.copy()).float()
 			act_vals = self.Q(obs)
 			action = act_vals.max(dim=1)[1].detach().tolist()
 			return action

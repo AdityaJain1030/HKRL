@@ -23,17 +23,16 @@ def preprocess(obs):
 	# return np.expand_dims(obs, 0)
 
 
-async def make_env(timescale, frames_per_wait):
+async def make_env(timescale, frames_per_wait, n_envs = 4):
 	# env = gym.make('Pong-ramNoFrameskip-v4')
 
 	# env = atari_preprocessing.AtariPreprocessing(env)
 	# env = gym.wrappers.FrameStack(env, 4)
 	# return env
-	env = MultiEnv(n_env=1, render_colored=False, time_scale=timescale,
-				   frames_per_wait=frames_per_wait, level="GG_Mega_Moss_Charger")
-	await env.load(0)
+	env = MultiEnv(n_env=n_envs, render_colored=False, time_scale=timescale,
+				   frames_per_wait=frames_per_wait, level="GG_Mega_Moss_Charger", pause_after_step=True)
+	await env.loadAll()
 	return env
-
 
 async def main(
 	init_eplison=0.95,
@@ -54,11 +53,12 @@ async def main(
 	log_path='./logs/pong',
 	time_scale=1,
 	frames_per_wait=1,
-	load_model = None
+	load_model = None,
+	number_of_envs = 4
 
 ):
 	# env = gym.vector.SyncVectorEnv([make_env for _ in range(8)])
-	env = await make_env(timescale=time_scale, frames_per_wait=frames_per_wait)
+	env = await make_env(timescale=time_scale, frames_per_wait=frames_per_wait, n_envs=number_of_envs)
 	# print("action space", env.action_space)
 
 	# agent_nopool = CnnDQN(env.observation_space.shape, (env.action_space.n,), lr=lr, gamma=gamma)
@@ -75,8 +75,10 @@ async def main(
 	# action_list = ["NOOP", "FIRE", "RIGHT", "LEFT", "RIGHTFIRE", "LEFTFIRE"]
 
 	eplison = init_eplison
-	obs = await env.reset(0)
-	obs = preprocess(obs)
+	obs = await env.resetall()
+	# print(obs)
+	# print(obs.shape)
+	# obs = preprocess(obs)
 	episode = 0
 
 	# metrics
@@ -100,18 +102,18 @@ async def main(
 		action = agent_linear.get_actions(obs, eplison)
 		# action = agent_pool.get_action(obs, eplison)
 
-		next_obs, reward, done, _ = await env.step(action[0], 0)
-		next_obs = preprocess(next_obs)
-		buffer.push(obs, action[0], reward, next_obs, done)
+		next_obs, reward, done, _ = await env.stepall(action)
+		# next_obs = preprocess(next_obs)
+		buffer.push_batch(obs, action, reward, next_obs, done)
 		obs = next_obs
 
 		ep_len += 1
-		ep_reward.append(reward)
+		ep_reward.append((sum(reward)/number_of_envs)) # average reward per env
 		ep_actions[action[0]] += 1
 
 		if t > learning_starts:
 			if t % train_every == 0:
-				await env.pause(0)
+				await env.pauseall()
 				s, a, r, s_n, d, i = buffer.sample(batch_size)
 				if t > buffer_size:
 					i = [age + t for age in i]
@@ -120,22 +122,21 @@ async def main(
 
 				loss = agent_linear.train(s, a, r, s_n, d)
 				ep_loss.append(loss)
-				await env.resume(0)
+				await env.resumeall()
 
 			eplison = max(final_eplison, init_eplison - (init_eplison -
 														 final_eplison) * (t - learning_starts) / e_greedy_steps)
 
 			if t % save_every == 0:
-				await env.pause(0)
+				await env.pauseall()
 				agent_linear.save(save_path + "_cnn" + str(t) + ".pt")
-				await env.resume(0)
+				await env.resumeall()
 				# agent_pool.save(save_path + "_pool")
 
 		if ep_len > max_timesteps:
-			obs = await env.reset(0)
-			obs = preprocess(obs)
-			print("episode: ", episode, "ep_len: ", ep_len, "ep_reward: ", sum(ep_reward), "avg_loss: ", np.mean(ep_loss), "eplison: ", eplison)
-			logger.log_scalar("ep_len", ep_len, episode)
+			obs = await env.resetall()
+			# obs = preprocess(obs)
+			print("episode: ", episode , "ep_reward: ", sum(ep_reward), "avg_loss: ", np.mean(ep_loss), "eplison: ", eplison)
 			logger.log_scalar("total_rew", np.sum(ep_reward), episode)
 			logger.log_scalar("avg_loss", np.mean(ep_loss), episode)
 			logger.log_scalar("eplison", eplison, episode)
@@ -174,24 +175,24 @@ async def eval(model, time_scale=1, frames_per_wait=5):
 	await env.close()
 
 # Adapted atari hyperparams 
-# asyncio.run(main(
-# 	log_path="./logs/hollow_knight/mossbag" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
-# 	train_every=4,
-# 	train_timesteps=1000000,
-# 	update_target_every=1000,
-# 	learning_starts=100000,
-# 	e_greedy_steps=100000,
-# 	save_every=50000,
-# 	max_timesteps=5000, #half of atari b/c enemies seem to disappear after a while
-# 	buffer_size=500000,
-# 	gamma=0.995,
-# 	time_scale=3,
-# 	frames_per_wait=2,
-# 	batch_size=32,
-# 	lr=0.0001,
-# 	load_model="./models/hollow_knight/mossbag3_cnn60000.pt",
-# 	save_path="./models/hollow_knight/mossbag4",
-# 	init_eplison=0.06, #start from pretrained model
-# 	))
+asyncio.run(main(
+	log_path="./logs/hollow_knight/mossbag" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
+	train_every=4,
+	train_timesteps=1000000,
+	update_target_every=1000,
+	learning_starts=100000,
+	e_greedy_steps=100000,
+	save_every=50000,
+	max_timesteps=5000, #half of atari b/c enemies seem to disappear after a while
+	buffer_size=500000,
+	gamma=0.995,
+	time_scale=3,
+	frames_per_wait=2,
+	batch_size=32,
+	lr=0.0001,
+	# load_model="./models/hollow_knight/mossbag3_cnn60000.pt",
+	save_path="./models/hollow_knight/mossbag4",
+	init_eplison=0.95, #start from pretrained model
+	))
 
 # asyncio.run(eval("./models/hollow_knight/mossbag3_cnn200000.pt"))

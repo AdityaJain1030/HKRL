@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 
 class MultiEnv:
-	def __init__(self, n_env=4, render_colored=False, observation_size=(100, 57), action_size=81, frames_per_wait=5, server_ip="localhost", server_port='8080', time_scale=1, level="GG_Hornet_1", hk_data_dir="Hollow Knight_Data", hk_path="F:\GOG Games\Hollow Knight", hk_save_dir="C:\\Users\\adity\\AppData\\LocalLow\\Team Cherry\\Hollow Knight"):
+	def __init__(self, n_env=4, render_colored=False, observation_size=(100, 57), action_size=81, frames_per_wait=5, server_ip="localhost", server_port='8080', time_scale=1, level="GG_Hornet_1", hk_data_dir="Hollow Knight_Data", hk_path="F:\GOG Games\Hollow Knight", pause_after_step=False):
 		self.n_env = n_env
 		self.server_ip = server_ip
 		self.server_port = server_port
@@ -16,6 +16,7 @@ class MultiEnv:
 		self.frame_delay = frames_per_wait
 		self.time_scale = time_scale
 		self.level = level
+		self.pause_after_step = pause_after_step
 
 		self.render_mode = 'human'
 		self.websockets = [None for _ in range(self.n_env)]
@@ -97,12 +98,22 @@ class MultiEnv:
 			obs *= 255
 
 		obs = np.rot90(obs)
+		obs = np.expand_dims(obs, axis=0)
+
 
 		return obs
 	
 	async def step(self, action, env_id):
 		await self.connected[env_id].wait()
+
+		if self.pause_after_step:
+			await self.resume(env_id)
+
 		message = await self.sendMessage('action', {'action': action}, env_id)
+		
+		if self.pause_after_step:
+			await self.pause(env_id)
+
 		if message is None:
 			return None, None, None, None
 		
@@ -117,14 +128,31 @@ class MultiEnv:
 			obs *= 255
 
 		obs = np.rot90(obs)
+		obs = np.expand_dims(obs, axis=0)
 
 		return obs, message['data']['reward'], message['data']['done'], message['data']['info']
+	
+	async def stepall(self, actions):
+		data = await asyncio.gather(*[self.step(actions[i], i) for i in range(self.n_env)])
+		return (*map(np.array, zip(*data)),)
+	
+	async def resetall(self):
+		data = await asyncio.gather(*[self.reset(i) for i in range(self.n_env)])
+		return np.array(data)
 
 	async def pause(self, env_id):
 		await self.connected[env_id].wait()
 		message = await self.sendMessage('pause', {}, env_id)
 		if message is None:
 			return None
+		return True
+	
+	async def pauseall(self):
+		await asyncio.gather(*[self.pause(i) for i in range(self.n_env)])
+		return True
+	
+	async def resumeall(self):
+		await asyncio.gather(*[self.resume(i) for i in range(self.n_env)])
 		return True
 	
 	def cvtclr(self, num):

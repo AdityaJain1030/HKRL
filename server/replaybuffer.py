@@ -10,6 +10,10 @@ class ReplayBuffer:
 	def push(self, obs, action, reward, next_obs, done):
 		self.buffer.append((obs, action, reward, next_obs, done))
 
+	def push_batch(self, obs, action, reward, next_obs, done):
+		for i in range(len(obs)):
+			self.push(obs[i], action[i], reward[i], next_obs[i], done[i])
+
 	def sample(self, batch_size):
 		batch = random.sample(list(enumerate(self.buffer)), min(batch_size, self.size))
 		index, batch = zip(*batch)
