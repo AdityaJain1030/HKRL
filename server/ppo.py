@@ -1,263 +1,444 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-import numpy as np
-from copy import deepcopy
-# from stable_baselines3 import
-
+from torch import nn
+from torch.nn import functional as F
+from torch import optim
 from torch.distributions import Categorical
 
+import numpy as np
 import gymnasium as gym
+from copy import deepcopy
+from logger import Logger
+from torchviz import make_dot
 
-class PPO(nn.Module):
-	def __init__(self, obs_size, act_size, gamma=0.99, clip=0.1, critic_weight=0.5, entropy_weight=0.01, lr_actor=0.0001, lr_critic=0.0001, gae_lambda=0.95):
-		super(PPO, self).__init__()
+from stable_baselines3.common.env_util import make_atari_env
+from stable_baselines3.common.vec_env import VecFrameStack
+
+
+class ActorCritic(nn.Module):
+	def __init__(self, obs_size, act_size, share_extractor=False):
+		super(ActorCritic, self).__init__()
+
 		self.obs_size = obs_size
 		self.channels = obs_size[0]
 		self.act_size = act_size
+		self.share_extractor = share_extractor
 
-		self.device = torch.device(
-			"cuda:0" if torch.cuda.is_available() else "cpu")
-
-		# define layers
-		# self.head = nn.Sequential( # Shared Input layer
-		# 	nn.Linear(obs_size, 64),
+	# 	NOTE: Make sure to normalize conv input
+		# self.extractor = nn.Sequential(
+		# 	nn.Conv2d(self.channels, 32, kernel_size=8, stride=4),
 		# 	nn.ReLU(),
-		# 	nn.Linear(64, 64),
-		# 	nn.ReLU()
+		# 	nn.Conv2d(32, 64, kernel_size=4, stride=2),
+		# 	nn.ReLU(),
+		# 	nn.Conv2d(64, 64, kernel_size=3, stride=1),
+		# 	nn.ReLU(),
+		# 	nn.Flatten()
 		# )
 
-		self.conv = nn.Sequential(
-			nn.Conv2d(self.channels, 32, kernel_size=8, stride=4, padding=2),
-			nn.ReLU(),
-			nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
-			nn.ReLU(),
-			nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-			nn.ReLU(),
-			nn.Flatten(),
+		self.extractor = nn.Sequential(
+			nn.Linear(np.prod(obs_size), 64),
+			nn.ReLU()
 		)
-		
+
+		if not self.share_extractor:
+			self.extractor_copy = deepcopy(self.extractor)
+
 		with torch.no_grad():
-			out_size = self.conv(torch.zeros(1, *obs_size)).numel()
+			out_size = self.extractor(
+				torch.zeros(1, *obs_size)).detach().numel()
+			print("out_size: ", out_size)
 
 		self.actor = nn.Sequential(
-			deepcopy(self.conv),
 			nn.Linear(out_size, 256),
-			nn.ReLU(),
-			nn.Linear(256, 256),
 			nn.ReLU(),
 			nn.Linear(256, act_size),
 			nn.Softmax(dim=-1)
-		).to(self.device)
-
-		self.old_actor = deepcopy(self.actor).to(self.device)
+		)
 
 		self.critic = nn.Sequential(
-			deepcopy(self.conv),
 			nn.Linear(out_size, 256),
 			nn.ReLU(),
-			nn.Linear(256, 256),
-			nn.ReLU(),
 			nn.Linear(256, 1)
-		).to(self.device)
+		)
 
-		self.clip = clip
-		self.critic_weight = critic_weight
-		self.entropy_weight = entropy_weight
+	def get_value(self, obs):
+		if self.share_extractor:
+			x = self.extractor(obs)
+		else:
+			x = self.extractor_copy(obs)
+		return self.critic(x)
 
-		self.lr_actor = lr_actor
-		self.lr_critic = lr_critic
-		self.gamma = gamma
-		self.gae_lambda = gae_lambda
-
-		self.optimizer = torch.optim.Adam([
-			{'params': self.actor.parameters(), 'lr': self.lr_actor},
-			{'params': self.critic.parameters(), 'lr': self.lr_critic}
-		])
-
-	def forward(self, x: torch.Tensor):
-		act_dist = Categorical(self.actor(x))
-		return act_dist
-
-	def old_forward(self, x: torch.Tensor):
-		act_dist = Categorical(self.old_actor(x))
-		return act_dist
-
-	def get_actions(self, obs: torch.Tensor):
-		dist = self.forward(obs)
+	def get_action(self, obs):
+		act_probs = self.actor(self.extractor(obs))
+		dist = Categorical(act_probs)
 		action = dist.sample()
-		return action.detach().cpu()
+		return action, dist.log_prob(action), dist.entropy()
 
-	# OBS SHOULD HAVE 1 MORE STEP THAN REWARDS AND DONES
-	def batch_update(self, obs: torch.Tensor, acts: torch.Tensor, rews: np.array, dones: np.array, update_iters=10):
-		obs = obs.to(self.device)
-		acts = acts.to(self.device)
-		# We can update the critic during the loop now as we already have our fixed advantages
-		advantages = self.calc_batch_advantages(obs, rews, dones)
+	def get_log_probs(self, obs, acts):
+		act_probs = self.actor(self.extractor(obs))
+		dist = Categorical(act_probs)
+		return dist.log_prob(acts)
 
-		obs = obs[:-1]
-		for _ in range(update_iters):
-			log_probs = self.forward(obs).log_prob(acts)
-			old_log_probs = self.old_forward(obs).log_prob(acts).detach()
 
-			r = torch.exp(log_probs - old_log_probs)
+class PPO:
+	def __init__(self, obs_size, act_size, lr=0.0001, gamma=0.99, clip=0.2, value_coeff=0.5, entropy_coeff=0.01,
+				 max_grad_norm=0.5, lam=0.95, target_kl=None, share_extractor=True, model_params=None, anneal_lr=None):
+		self.obs_size = obs_size
+		self.act_size = act_size
+		self.gamma = gamma
+		self.learning_rate = lr
+		self.lam = lam
+		self.max_grad_norm = max_grad_norm
+		self.share_extractor = share_extractor
+		self.anneal_lr = False if anneal_lr is None else True
 
-			surrogate_loss = torch.min(
-				r * advantages, torch.clamp(r, 1-self.clip, 1+self.clip) * advantages)
-			critic_loss = F.mse_loss(self.critic(
-				obs).squeeze(dim=-1).unsqueeze(dim=0), advantages)
-			entropy_loss = self.forward(obs).entropy()
+		self.target_kl = target_kl
+		self.clip = clip
+		self.value_coeff = value_coeff
+		self.entropy_coeff = entropy_coeff
 
-			loss = -surrogate_loss + \
-				(self.critic_weight * critic_loss) - \
-				(self.entropy_weight * entropy_loss)
+		self.device = torch.device(
+			"cuda" if torch.cuda.is_available() else "cpu")
 
-			self.optimizer.zero_grad()
-			loss.mean().backward()
-			self.optimizer.step()
+		self.policy = ActorCritic(
+			self.obs_size, self.act_size, share_extractor).to(self.device)
+		self.policy.apply(self.init_orthog_weights)
 
-		kl = (old_log_probs - log_probs).mean().item()
+		if model_params is not None:
+			self.policy.load_state_dict(model_params)
 
-		self.old_actor.load_state_dict(self.actor.state_dict())
+		self.optimizer = optim.Adam(
+			self.policy.parameters(), lr=self.learning_rate)
 
-		return surrogate_loss.mean().item(), critic_loss.mean().item(), entropy_loss.mean().item(), kl
-	
-	def batch_act_est(self, batch):
-		out = []
-		for i in batch:
-			dist = self.forward(i).sample()
-			out.append(dist)
+		if self.anneal_lr:
+			self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+				self.optimizer, lr_lambda=lambda epoch: 1 - epoch / anneal_lr)
 
-	#impl so ass I need one of these
-	def batch_val_est(self, batch):
-		out = []
-		for i in batch:
-			# print(i.shape)
-			val = self.critic(i).squeeze(dim=-1).detach()
-			out.append(val)
+	def init_orthog_weights(self, m):
+		if type(m) == nn.Linear:
+			nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
+			nn.init.zeros_(m.bias)
+		if type(m) == nn.Conv2d:
+			nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
+			nn.init.zeros_(m.bias)
 
-		return torch.stack(out)
-	
-	def save(self, path):
-		torch.save({
-			'actor': self.actor.state_dict(),
-			'critic': self.critic.state_dict(),
-			'optim': self.optimizer.state_dict()
-		}, path)
-
-	def load(self, path):
-		data = torch.load(path)
-		self.actor.load_state_dict(data['actor'])
-		self.old_actor.load_state_dict(data['actor'])
-		self.critic.load_state_dict(data['critic'])
-		self.optimizer.load_state_dict(data['optim'])
-
-	def calc_batch_advantages(self, obs: torch.Tensor, rews: np.array, dones: np.array) -> torch.Tensor:
-		# Get critic value estimations
-		
-		# value_est = self.batch_val_est(obs).cpu().numpy()
-		value_est = self.critic(obs).squeeze(dim=-1).unsqueeze(dim=0).detach().cpu().numpy()
-
-		# calculate batch td errors
-		batch_td_errors = np.zeros_like(rews)
-		batch_adv = np.zeros_like(rews)
-
-		for i in range(len(rews)):
-			batch_td_errors[i][-1] = rews[i][-1] + self.gamma * (1 - dones[i][-1]) * value_est[i][-1]
-			for t in range(len(rews[i])-2, -1, -1):
-				batch_td_errors[i][t] = rews[i][t] + self.gamma * (1 - dones[i][t]) * batch_td_errors[i][t+1]
-
-		batch_td_errors = batch_td_errors + self.gamma * (1 - dones) * value_est[:, 1:] - value_est[:, :-1]
-
-		# calculate batch advantages
-		for i in range(len(rews)):
-			batch_adv[i][-1] = batch_td_errors[i][-1]
-			for t in range(len(rews[i])-2, -1, -1):
-				batch_adv[i][t] = batch_td_errors[i][t] + self.gamma * self.gae_lambda * batch_adv[i][t+1]
-
-		advantages = torch.tensor(
-			batch_adv, dtype=torch.float32).to(self.device)
-		advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+	# Taken from cleanRL implementation
+	def get_advantages(self, rewards, dones, values):
+		advantages = np.empty_like(rewards, dtype=np.float32)
+		lastgaelam = 0
+		for t in reversed(range(len(rewards))):
+			nonterminal = 1 - dones[t]
+			delta = rewards[t] + self.gamma * \
+				values[t + 1] * nonterminal - values[t]
+			lastgaelam = delta + self.gamma * self.lam * nonterminal * lastgaelam
+			advantages[t] = lastgaelam
 
 		return advantages
 
-def make_env(env):
-	env = gym.make(env)
-	env = gym.wrappers.AtariPreprocessing(env)
-	env = gym.wrappers.FrameStack(env, num_stack=4)
+	def save(self, path):
+		torch.save(self.policy.state_dict(), path)
+
+	def load(self, path):
+		self.policy.load_state_dict(torch.load(path))
+
+	def save_checkpoint(self, path):
+		torch.save({
+			"model": self.policy.state_dict(),
+			"optimizer": self.optimizer.state_dict(),
+			"scheduler": self.scheduler.state_dict() if self.anneal_lr else None
+		}, path)
+
+	def load_checkpoint(self, path):
+		checkpoint = torch.load(path)
+		self.policy.load_state_dict(checkpoint["model"])
+		self.optimizer.load_state_dict(checkpoint["optimizer"])
+		if self.anneal_lr:
+			self.scheduler.load_state_dict(checkpoint["scheduler"])
+
+	# make sure there is an extra obs at the end of the trajectory for bootstrapping the TD error
+	def train(self, obs, act, old_log_probs, rews, dones, num_updates=10):
+
+		with torch.no_grad():
+			# convert to tensors
+			obs = torch.from_numpy(obs).float().to(self.device)
+			act = torch.from_numpy(act).long().to(self.device)
+			old_log_probs = torch.from_numpy(
+				old_log_probs).float().to(self.device)
+
+			# bootstrap final reward from trajectory with value estimate, as we don't know what the true final reward would be (since it's the end of the episode)
+			values = self.policy.get_value(obs).squeeze(-1)
+			rews[-1] += self.gamma * values[-1] * (1 - dones[-1]) # <- note that we dont really need the last 1-done b/c it's recalcualted in the GAE computation but im too lazy to change it
+
+			# advantage computation (I still dont know how GAE works so we pray)
+			values = values.cpu().numpy()
+			advantages = self.get_advantages(rews, dones, values)
+			critic_target = advantages + values[:-1]
+			advantages = (advantages - np.mean(advantages)) / \
+				(np.std(advantages) + 1e-8)
+
+			# convert to tensors
+			advantages = torch.from_numpy(advantages).float().to(self.device)
+			critic_target = torch.from_numpy(
+				critic_target).float().to(self.device)
+
+			# discard last obs as we don't have a reward for it
+			obs = obs[:-1]
+
+		# Update policy whole batch at once, I dont see the benefit in minibatching within a rollout
+		for _ in range(num_updates):
+
+			# actor loss
+			new_log_probs = self.policy.get_log_probs(obs, act)
+
+			log_ratio = new_log_probs - old_log_probs
+			ratio = torch.exp(log_ratio)
+			clipped_ratio = torch.clamp(ratio, 1 - self.clip, 1 + self.clip)
+			surrogate_loss = - \
+				torch.min(ratio * advantages,
+						  clipped_ratio * advantages).mean()
+
+			# critic loss
+			values = self.policy.get_value(obs).squeeze(-1)
+			value_loss = F.mse_loss(values, critic_target)
+
+			# entropy loss (must be under new policy distribution)
+			_, _, entropy = self.policy.get_action(obs)
+			entropy_loss = -entropy.mean()
+
+			# optimization step
+			loss = surrogate_loss + self.value_coeff * \
+				value_loss + self.entropy_coeff * entropy_loss
+
+			self.optimizer.zero_grad()
+			loss.backward()
+			nn.utils.clip_grad_norm_(
+				self.policy.parameters(), self.max_grad_norm)
+			self.optimizer.step()
+
+			with torch.no_grad():
+				# get approximate single-sample KL divergence between old and new policy. Equation taken from http://joschu.net/blog/kl-approx.html
+				# kl = (-log_ratio).mean()
+				kl = ((ratio - 1) - log_ratio).mean().item() # <- More numerically stable KL computation
+				if self.target_kl is not None and kl > self.target_kl:
+					break
+
+		return surrogate_loss.item(), value_loss.item(), entropy_loss.item(), kl
+
+
+def make_env(env_name, render_mode=None, num_envs=4):
+	# make atari env
+	if render_mode is not None:
+		env = gym.make(env_name, render_mode=render_mode)
+		return env
+	env = make_atari_env(env_name, n_envs=num_envs, seed=0)
+	env = VecFrameStack(env, n_stack=4)
+
+	# to make it work with other code
+	env.single_observation_space = gym.spaces.Box(
+		0, 255, (4, 84, 84), dtype=np.uint8)
+	env.single_action_space = env.action_space
 	return env
 
-def main():
-	env = make_env("PongNoFrameskip-v4")
-	agent = PPO(env.observation_space.shape, env.action_space.n)
+
+def make_cartpole_env(n_envs):
+	env = gym.vector.make("CartPole-v1", num_envs=n_envs)
+	return env
+
+
+def process_obs(obs):
+	obs = np.array(obs, dtype=np.float32)
+	obs = np.moveaxis(obs, -1, 1)
+	obs /= 255.0
+	return obs
+
+
+def main(
+		epochs=200,
+		rollout_len=512,
+		save_every_epochs=10,
+		save_path="models/ppo",
+		learning_rate=2.5e-4,
+		gamma=0.99,
+		clip=0.1,
+		value_coeff=0.5,
+		entropy_coeff=0.01,
+		max_grad_norm=0.5,
+		gae_lambda=0.95,
+		target_kl=None,
+		model_params=None,
+		logs_path="logs/ppo",
+		start_from_epoch=0,
+		chkpt_path=None,
+		num_envs=4,
+		share_extractor=True,
+		train_iters=4,
+		anneal_lr=True,
+):
+	# env = make_env("BreakoutNoFrameskip-v4", num_envs=num_envs)
+	env = make_cartpole_env(num_envs)
+	agent = PPO(
+		env.single_observation_space.shape, env.single_action_space.n, lr=learning_rate, gamma=gamma, clip=clip, value_coeff=value_coeff,
+		entropy_coeff=entropy_coeff, max_grad_norm=max_grad_norm, target_kl=target_kl, lam=gae_lambda, model_params=model_params,
+		share_extractor=share_extractor, anneal_lr=None if not anneal_lr else epochs
+	)
+	logger = Logger(logs_path)
+
+	if chkpt_path is not None:
+		print("Staring from checkpoint: ", chkpt_path)
+		print("Starting from epoch: ", start_from_epoch)
+		agent.load_checkpoint(chkpt_path)
+
+	logger.log_hps({
+		"training_epochs": epochs,
+		"rollout_len": rollout_len,
+		"learning_rate": learning_rate,
+		"gamma": gamma,
+		"surrogate_epsillon": clip,
+		"value_coeff": value_coeff,
+		"entropy_coeff": entropy_coeff,
+		"max_gradient": max_grad_norm,
+		"lambda": gae_lambda,
+		"target_kl": target_kl,
+		"num_envs": num_envs,
+		"share_extractor": share_extractor,
+		"gradient_updates_per_rollout": train_iters,
+		"anneal_lr": anneal_lr,
+		"start_from_epoch": start_from_epoch,
+		"chkpt_path": chkpt_path,
+		"save_every_epochs": save_every_epochs,
+		"save_path": save_path,
+	})
+
+	obs, _ = env.reset()
+	done = False
+	# obs = process_obs(obs)
+	obs = np.array(obs)
+
+	for epoch in range(start_from_epoch, epochs):
+		# init buffers
+		obs_buf = np.ndarray((rollout_len + 1, num_envs, *
+							  env.single_observation_space.shape), dtype=np.float32)
+		act_buf = np.ndarray(
+			(rollout_len, num_envs, *env.single_action_space.shape), dtype=np.int32)
+		old_log_probs_buf = np.ndarray(
+			(rollout_len, num_envs, *env.single_action_space.shape), dtype=np.float32)
+		rews_buf = np.ndarray((rollout_len, num_envs), dtype=np.float32)
+		dones_buf = np.ndarray((rollout_len, num_envs), dtype=np.float32)
+
+		# metrics
+		ep_rews = np.zeros(num_envs)
+		ep_len = np.zeros(num_envs)
+
+		avg_ep_len = []
+		avg_ep_rew = []
+
+		for t in range(rollout_len):
+			with torch.no_grad():
+				# step
+				act, log_prob, _ = agent.policy.get_action(
+					torch.from_numpy(obs).float().to(agent.device)
+				)
+				act = act.cpu().numpy()
+				next_obs, rew, done, _, _ = env.step(act)
+
+				# add to buffer
+				obs_buf[t] = obs
+				act_buf[t] = act
+				old_log_probs_buf[t] = log_prob.cpu().numpy()
+				rews_buf[t] = rew
+				dones_buf[t] = done
+
+				# update obs
+				# obs = process_obs(next_obs)
+				obs = np.array(next_obs)
+
+				# Metrics
+				ep_len += 1
+				ep_rews += rew
+
+				for i, d in enumerate(done):
+					if d:
+						avg_ep_len.append(ep_len[i])
+						ep_len[i] = 0
+						avg_ep_rew.append(ep_rews[i])
+						ep_rews[i] = 0
+
+		obs_buf[-1] = obs
+
+		avg_ep_len.extend(ep_len)
+		avg_ep_rew.extend(ep_rews)
+
+		# transpose buffers to be of shape (num_envs, ep_len, ...)
+		obs_buf = obs_buf.swapaxes(0, 1)
+		act_buf = act_buf.swapaxes(0, 1)
+		old_log_probs_buf = old_log_probs_buf.swapaxes(0, 1)
+		rews_buf = rews_buf.swapaxes(0, 1)
+		dones_buf = dones_buf.swapaxes(0, 1)
+
+		# train
+		avg_surrogate_loss = 0
+		avg_value_loss = 0
+		avg_entropy_loss = 0
+		avg_kl = 0
+
+		# Minibatching aross envs
+		for i in range(num_envs):
+			surrogate_loss, value_loss, entropy_loss, kl = agent.train(
+				obs_buf[i], act_buf[i], old_log_probs_buf[i], rews_buf[i], dones_buf[i], num_updates=train_iters)
+
+			avg_surrogate_loss += surrogate_loss
+			avg_value_loss += value_loss
+			avg_entropy_loss += entropy_loss
+			avg_kl += kl
+		
+		# anneal learning rate after each epoch
+		if anneal_lr:
+			agent.scheduler.step()
+
+		avg_surrogate_loss /= num_envs
+		avg_value_loss /= num_envs
+		avg_entropy_loss /= num_envs
+		avg_kl /= num_envs
+
+		# log
+		logger.log_scalar("loss/surrogate_loss", avg_surrogate_loss, epoch)
+		logger.log_scalar("loss/value_loss", avg_value_loss, epoch)
+		logger.log_scalar("loss/entropy_loss", avg_entropy_loss, epoch)
+		logger.log_scalar("loss/kl", avg_kl, epoch)
+		logger.log_scalar("rollout/avg_ep_len", np.mean(avg_ep_len), epoch)
+		logger.log_scalar("rollout/avg_ep_rew", np.mean(avg_ep_rew), epoch)
+		logger.log_scalar("lr", agent.optimizer.param_groups[0]["lr"], epoch)
+
+		print("epoch: ", epoch, "avg_ep_len: ", np.mean(avg_ep_len), "avg_ep_rew: ", np.mean(avg_ep_rew), "avg_surrogate_loss: ",
+			  avg_surrogate_loss, "avg_value_loss: ", avg_value_loss, "avg_entropy_loss: ", avg_entropy_loss, "avg_kl: ", avg_kl)
+
+		# save
+		if epoch % save_every_epochs == 0:
+			agent.save_checkpoint(f"{save_path}_{epoch}.pth")
+
+	agent.save(f"{save_path}.pth")
+	env.close()
+
+
+def eval():
+	# env = make_env("BreakoutNoFrameskip-v4", render_mode="human")
+	env = gym.make("CartPole-v1", render_mode="human")
+	agent = PPO(env.observation_space.shape,
+				env.action_space.n, share_extractor=True)
+	agent.load("models/ppo.pth")
 
 	obs, _ = env.reset()
 	obs = np.array(obs)
 	obs = np.expand_dims(obs, axis=0)
-
 	done = False
-
-	obs_ = []
-	acts_ = []
-	rews_ = []
-	dones_ = []
-
-	avg_rew = 0
-
-	#metrics
-	ep_len = 0
-	ep_rew = []
-	ep_rews = []
-	ep_lens = []
-	# ep_rew = []
-	# ep_len = np.ndarray(8)
-	# ep_lens = []
-	# ep_rews = []
-
-	for epoch in range(1000):
-		for _ in range(10000):
-			acts = agent.get_actions(torch.from_numpy(obs).float().to(agent.device))
-			# print(acts.shape)
-			next_obs, rew, done, _, _ = env.step(acts.cpu().item())
-
-			obs_.append(obs)
-			acts_.append(acts.tolist())
-			rews_.append(rew)
-			dones_.append(done)
-			obs = np.array(next_obs)
-			obs = np.expand_dims(obs, axis=0)
-
-			#metrics
-			ep_rew.append(rew)
-			ep_len += 1
-
-			if done:
-				ep_rews.append(np.sum(ep_rew))
-				ep_lens.append(ep_len)
-				ep_rew = []
-				ep_len = 0
-
-
-
-		
-		obs_.append(obs)
-		t_obs = torch.from_numpy(np.array(obs_)).float().to(agent.device).transpose(0, 1).squeeze(dim=0)
-		t_acts = torch.tensor(acts_, dtype=torch.int64).to(agent.device).transpose(0, 1).squeeze(dim=0)
-		t_rews = np.expand_dims(np.array(rews_).transpose(), axis=0)
-		t_dones = np.expand_dims(np.array(dones_).transpose(), axis=0)
-
-		obs_ = []
-		acts_ = []
-		rews_ = []
-		dones_ = []
-
-		surrogate_loss, critic_loss, entropy_loss, kl = agent.batch_update(t_obs, t_acts, t_rews, t_dones)
-		print(f"Epoch: {epoch} | Actor Loss: {surrogate_loss} | Critic Loss: {critic_loss} | Entropy: {entropy_loss} | KL Divergence: {kl} | avg_rewards: {np.mean(ep_rews)}, avg_ep_len: {np.mean(ep_lens)}")
-
-		if epoch % 10 == 0:
-			agent.save(f"models/ppo_{epoch}.pth")
-
+	while not done:
+		act, _, _ = agent.policy.get_action(
+			torch.from_numpy(obs).float().to(agent.device))
+		next_obs, rew, done, _, _ = env.step(act.detach().item())
+		obs = np.array(next_obs)
+		obs = np.expand_dims(obs, axis=0)
+		env.render()
 
 if __name__ == "__main__":
-	main()
+	# main(logs_path="logs/ppo_cartpole_3")
+	eval()
+	# test()
