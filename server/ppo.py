@@ -10,8 +10,14 @@ from copy import deepcopy
 from logger import Logger
 from torchviz import make_dot
 
-from stable_baselines3.common.env_util import make_atari_env
-from stable_baselines3.common.vec_env import VecFrameStack
+from stable_baselines3.common.atari_wrappers import (  # isort:skip
+    ClipRewardEnv,
+    EpisodicLifeEnv,
+    FireResetEnv,
+    MaxAndSkipEnv,
+    NoopResetEnv,
+    WarpFrame,
+)
 
 
 class ActorCritic(nn.Module):
@@ -24,20 +30,20 @@ class ActorCritic(nn.Module):
 		self.share_extractor = share_extractor
 
 	# 	NOTE: Make sure to normalize conv input
-		# self.extractor = nn.Sequential(
-		# 	nn.Conv2d(self.channels, 32, kernel_size=8, stride=4),
-		# 	nn.ReLU(),
-		# 	nn.Conv2d(32, 64, kernel_size=4, stride=2),
-		# 	nn.ReLU(),
-		# 	nn.Conv2d(64, 64, kernel_size=3, stride=1),
-		# 	nn.ReLU(),
-		# 	nn.Flatten()
-		# )
-
 		self.extractor = nn.Sequential(
-			nn.Linear(np.prod(obs_size), 64),
-			nn.ReLU()
+			nn.Conv2d(self.channels, 32, kernel_size=8, stride=4),
+			nn.ReLU(),
+			nn.Conv2d(32, 64, kernel_size=4, stride=2),
+			nn.ReLU(),
+			nn.Conv2d(64, 64, kernel_size=3, stride=1),
+			nn.ReLU(),
+			nn.Flatten()
 		)
+
+		# self.extractor = nn.Sequential(
+		# 	nn.Linear(np.prod(obs_size), 64),
+		# 	nn.ReLU()
+		# )
 
 		if not self.share_extractor:
 			self.extractor_copy = deepcopy(self.extractor)
@@ -48,16 +54,16 @@ class ActorCritic(nn.Module):
 			print("out_size: ", out_size)
 
 		self.actor = nn.Sequential(
-			nn.Linear(out_size, 256),
+			nn.Linear(out_size, 512),
 			nn.ReLU(),
-			nn.Linear(256, act_size),
+			nn.Linear(512, act_size),
 			nn.Softmax(dim=-1)
 		)
 
 		self.critic = nn.Sequential(
-			nn.Linear(out_size, 256),
+			nn.Linear(out_size, 512),
 			nn.ReLU(),
-			nn.Linear(256, 1)
+			nn.Linear(512, 1)
 		)
 
 	def get_value(self, obs):
@@ -101,7 +107,15 @@ class PPO:
 
 		self.policy = ActorCritic(
 			self.obs_size, self.act_size, share_extractor).to(self.device)
-		self.policy.apply(self.init_orthog_weights)
+		
+		# init weights to be orthogonal
+		self.policy.extractor.apply(self.init_orthog_weights)
+		if not self.share_extractor:
+			self.policy.extractor_copy.apply(self.init_orthog_weights)
+
+		#maybe this helps?
+		self.policy.actor.apply(lambda m: self.init_orthog_weights(m, std=0.01))
+		self.policy.critic.apply(lambda m: self.init_orthog_weights(m, std=1))
 
 		if model_params is not None:
 			self.policy.load_state_dict(model_params)
@@ -109,17 +123,18 @@ class PPO:
 		self.optimizer = optim.Adam(
 			self.policy.parameters(), lr=self.learning_rate)
 
+		# TODO: Move scheduler to training loop, kinda jank to have it here
 		if self.anneal_lr:
 			self.scheduler = torch.optim.lr_scheduler.LambdaLR(
 				self.optimizer, lr_lambda=lambda epoch: 1 - epoch / anneal_lr)
 
-	def init_orthog_weights(self, m):
+	def init_orthog_weights(self, m, std=np.sqrt(2), bias=0.0):
 		if type(m) == nn.Linear:
-			nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
-			nn.init.zeros_(m.bias)
+			nn.init.orthogonal_(m.weight, gain=std)
+			nn.init.constant_(m.bias, bias)
 		if type(m) == nn.Conv2d:
-			nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
-			nn.init.zeros_(m.bias)
+			nn.init.orthogonal_(m.weight, gain=std)
+			nn.init.constant_(m.bias, bias)
 
 	# Taken from cleanRL implementation
 	def get_advantages(self, rewards, dones, values):
@@ -175,16 +190,18 @@ class PPO:
 			advantages = (advantages - np.mean(advantages)) / \
 				(np.std(advantages) + 1e-8)
 
+			# discard last obs as we don't have a reward for it
+			obs = obs[:-1]
+			
 			# convert to tensors
 			advantages = torch.from_numpy(advantages).float().to(self.device)
 			critic_target = torch.from_numpy(
 				critic_target).float().to(self.device)
-
-			# discard last obs as we don't have a reward for it
-			obs = obs[:-1]
+			
+			clip_frac = torch.empty(num_updates)
 
 		# Update policy whole batch at once, I dont see the benefit in minibatching within a rollout
-		for _ in range(num_updates):
+		for grad_update in range(num_updates):
 
 			# actor loss
 			new_log_probs = self.policy.get_log_probs(obs, act)
@@ -214,28 +231,60 @@ class PPO:
 				self.policy.parameters(), self.max_grad_norm)
 			self.optimizer.step()
 
+			#metrics
 			with torch.no_grad():
-				# get approximate single-sample KL divergence between old and new policy. Equation taken from http://joschu.net/blog/kl-approx.html
-				# kl = (-log_ratio).mean()
+				#clip_frac
+				clip_frac[grad_update] = (abs((ratio - 1)) > self.clip).float().mean()
+
+				#explained variance
+				target_variance = critic_target.var()
+				explained_var = torch.nan if target_variance == 0 else 1 - (values - critic_target).var() / target_variance
+
+				# get approximate single-sample KL divergence. Equation taken from http://joschu.net/blog/kl-approx.html
 				kl = ((ratio - 1) - log_ratio).mean().item() # <- More numerically stable KL computation
 				if self.target_kl is not None and kl > self.target_kl:
 					break
 
-		return surrogate_loss.item(), value_loss.item(), entropy_loss.item(), kl
+		return surrogate_loss.item(), value_loss.item(), entropy_loss.item(), kl, clip_frac[:grad_update].mean().item(), explained_var.item()
 
 
 def make_env(env_name, render_mode=None, num_envs=4):
 	# make atari env
-	if render_mode is not None:
-		env = gym.make(env_name, render_mode=render_mode)
-		return env
-	env = make_atari_env(env_name, n_envs=num_envs, seed=0)
-	env = VecFrameStack(env, n_stack=4)
+	if render_mode is None:
+		def thunk():
+			env = gym.make(env_name)
+			env = NoopResetEnv(env, noop_max=30)
+			env = MaxAndSkipEnv(env, skip=4)
+			if "FIRE" in env.unwrapped.get_action_meanings():
+				env = FireResetEnv(env)
+			env = EpisodicLifeEnv(env)
+			env = ClipRewardEnv(env)
+			env = gym.wrappers.ResizeObservation(env, (84, 84))
+			env = gym.wrappers.GrayScaleObservation(env)
+			env = gym.wrappers.FrameStack(env, num_stack=4)
+			return env
+		
+		env = gym.vector.AsyncVectorEnv([thunk for _ in range(num_envs)])
+	else:
+		def thunk():
+			env = gym.make(env_name, render_mode=render_mode)
+			env = NoopResetEnv(env, noop_max=30)
+			env = MaxAndSkipEnv(env, skip=4)
+			if "FIRE" in env.unwrapped.get_action_meanings():
+				env = FireResetEnv(env)
+			env = EpisodicLifeEnv(env)
+			env = ClipRewardEnv(env)
+			env = gym.wrappers.ResizeObservation(env, (84, 84))
+			env = gym.wrappers.GrayScaleObservation(env)
+			env = gym.wrappers.FrameStack(env, num_stack=4)
+			return env
+		env = gym.vector.AsyncVectorEnv([thunk for _ in range(num_envs)])
 
-	# to make it work with other code
-	env.single_observation_space = gym.spaces.Box(
-		0, 255, (4, 84, 84), dtype=np.uint8)
-	env.single_action_space = env.action_space
+	# hacky way to make the env work with the code
+	# env.single_observation_space = gym.spaces.Box(
+	# 	0, 255, (4, 84, 84), dtype=np.uint8)
+	# env.single_action_space = env.action_space
+	print(env.single_observation_space.shape)
 	return env
 
 
@@ -246,7 +295,6 @@ def make_cartpole_env(n_envs):
 
 def process_obs(obs):
 	obs = np.array(obs, dtype=np.float32)
-	obs = np.moveaxis(obs, -1, 1)
 	obs /= 255.0
 	return obs
 
@@ -272,9 +320,10 @@ def main(
 		share_extractor=True,
 		train_iters=4,
 		anneal_lr=True,
+		log_steps=False
 ):
-	# env = make_env("BreakoutNoFrameskip-v4", num_envs=num_envs)
-	env = make_cartpole_env(num_envs)
+	env = make_env("PongNoFrameskip-v4", num_envs=num_envs)
+	# env = make_cartpole_env(num_envs)
 	agent = PPO(
 		env.single_observation_space.shape, env.single_action_space.n, lr=learning_rate, gamma=gamma, clip=clip, value_coeff=value_coeff,
 		entropy_coeff=entropy_coeff, max_grad_norm=max_grad_norm, target_kl=target_kl, lam=gae_lambda, model_params=model_params,
@@ -306,15 +355,27 @@ def main(
 		"chkpt_path": chkpt_path,
 		"save_every_epochs": save_every_epochs,
 		"save_path": save_path,
-	})
+	},
+	[
+		"loss/surrogate_loss",
+		"loss/value_loss",
+		"loss/entropy_loss",
+		"rollout/avg_ep_len",
+		"rollout/avg_ep_rew",
+		"metrics/lr",
+		"metrics/clip_frac",
+		"metrics/explained_variance",
+		"metrics/kl"
+	])
 
 	obs, _ = env.reset()
 	done = False
-	# obs = process_obs(obs)
-	obs = np.array(obs)
+	obs = process_obs(obs)
+	# obs = np.array(obs)
 
 	for epoch in range(start_from_epoch, epochs):
 		# init buffers
+		# TODO: Make this more memory efficient (initialize minibatch instead of whole batch, allows for greater rollout and maybe greater performance?)
 		obs_buf = np.ndarray((rollout_len + 1, num_envs, *
 							  env.single_observation_space.shape), dtype=np.float32)
 		act_buf = np.ndarray(
@@ -348,8 +409,8 @@ def main(
 				dones_buf[t] = done
 
 				# update obs
-				# obs = process_obs(next_obs)
-				obs = np.array(next_obs)
+				obs = process_obs(next_obs)
+				# obs = np.array(next_obs)
 
 				# Metrics
 				ep_len += 1
@@ -364,6 +425,12 @@ def main(
 
 		obs_buf[-1] = obs
 
+		# This is a bit jank, as during the end of training where the AI only dies once or twice,
+		# the avg ep length and reward will look low, as one death will 
+		# half the average, but the AI is still doing well. 
+		# To my knowledge, this shouldnt affect training, but it's something to keep in mind
+		# On the reward graph this has the most effect during the end of training,
+		# so crank up the smoothing to see the trend for last few epochs
 		avg_ep_len.extend(ep_len)
 		avg_ep_rew.extend(ep_rews)
 
@@ -379,16 +446,18 @@ def main(
 		avg_value_loss = 0
 		avg_entropy_loss = 0
 		avg_kl = 0
+		clip_frac = 0
 
-		# Minibatching aross envs
+		# Minibatching aross envs is easier than across rollouts, and almost as good
 		for i in range(num_envs):
-			surrogate_loss, value_loss, entropy_loss, kl = agent.train(
+			surrogate_loss, value_loss, entropy_loss, kl, clip_frac, ev = agent.train(
 				obs_buf[i], act_buf[i], old_log_probs_buf[i], rews_buf[i], dones_buf[i], num_updates=train_iters)
 
 			avg_surrogate_loss += surrogate_loss
 			avg_value_loss += value_loss
 			avg_entropy_loss += entropy_loss
 			avg_kl += kl
+			clip_frac += clip_frac
 		
 		# anneal learning rate after each epoch
 		if anneal_lr:
@@ -398,15 +467,29 @@ def main(
 		avg_value_loss /= num_envs
 		avg_entropy_loss /= num_envs
 		avg_kl /= num_envs
+		clip_frac /= num_envs
 
 		# log
-		logger.log_scalar("loss/surrogate_loss", avg_surrogate_loss, epoch)
-		logger.log_scalar("loss/value_loss", avg_value_loss, epoch)
-		logger.log_scalar("loss/entropy_loss", avg_entropy_loss, epoch)
-		logger.log_scalar("loss/kl", avg_kl, epoch)
-		logger.log_scalar("rollout/avg_ep_len", np.mean(avg_ep_len), epoch)
-		logger.log_scalar("rollout/avg_ep_rew", np.mean(avg_ep_rew), epoch)
-		logger.log_scalar("lr", agent.optimizer.param_groups[0]["lr"], epoch)
+		if log_steps:
+			t = epoch * num_envs * rollout_len
+		else:
+			t = epoch
+
+		logger.log_scalar("loss/surrogate_loss", avg_surrogate_loss, t) # <- Graph should be decreasing
+		logger.log_scalar("loss/value_loss", avg_value_loss, t) # <- Graph should be approaching 0 from positive
+		logger.log_scalar("loss/entropy_loss", avg_entropy_loss, t) # <- Graph should be approaching to 0 from negative
+
+		# theres a few problems with how I implemented these metrics so if the agent looks varied at the end of training, this is probably why (see above)
+		logger.log_scalar("rollout/avg_ep_len", np.mean(avg_ep_len), t) # <- Graph should be increasing, main metric
+		logger.log_scalar("rollout/avg_ep_rew", np.mean(avg_ep_rew), t) # <- Graph should be increasing, main metric
+
+		logger.log_scalar("metrics/lr", agent.optimizer.param_groups[0]["lr"], t)
+		logger.log_scalar("metrics/clip_frac", clip_frac, t)
+		logger.log_scalar("metrics/explained_variance", ev, t) # <- Should be approaching 1
+		logger.log_scalar("metrics/kl", avg_kl, t) # <- Should stay under 0.1, hopefully under 0.05
+
+		logger.log_scalar("other/num_grad_updates", epoch * num_envs * train_iters, t)
+		logger.log_scalar("other/num_timesteps", epoch * num_envs * rollout_len, t)
 
 		print("epoch: ", epoch, "avg_ep_len: ", np.mean(avg_ep_len), "avg_ep_rew: ", np.mean(avg_ep_rew), "avg_surrogate_loss: ",
 			  avg_surrogate_loss, "avg_value_loss: ", avg_value_loss, "avg_entropy_loss: ", avg_entropy_loss, "avg_kl: ", avg_kl)
@@ -419,26 +502,30 @@ def main(
 	env.close()
 
 
-def eval():
-	# env = make_env("BreakoutNoFrameskip-v4", render_mode="human")
-	env = gym.make("CartPole-v1", render_mode="human")
-	agent = PPO(env.observation_space.shape,
-				env.action_space.n, share_extractor=True)
-	agent.load("models/ppo.pth")
+def eval(load_model=None, load_chkpt=None):
+	env = make_env("PongNoFrameskip-v4", render_mode="human", num_envs=1)
+	# env = gym.make("CartPole-v1", render_mode="human")
+	agent = PPO(env.single_observation_space.shape,
+				env.single_action_space.n, share_extractor=True)
+	
+	if load_model is not None:
+		agent.load(load_model)
+	elif load_chkpt is not None:
+		agent.load_checkpoint(load_chkpt)
 
 	obs, _ = env.reset()
-	obs = np.array(obs)
-	obs = np.expand_dims(obs, axis=0)
+	obs = process_obs(obs)
+
 	done = False
 	while not done:
 		act, _, _ = agent.policy.get_action(
 			torch.from_numpy(obs).float().to(agent.device))
-		next_obs, rew, done, _, _ = env.step(act.detach().item())
-		obs = np.array(next_obs)
-		obs = np.expand_dims(obs, axis=0)
-		env.render()
+		next_obs, _, done, _, _ = env.step(act.detach().cpu().numpy())
+		obs = process_obs(next_obs)
 
 if __name__ == "__main__":
-	# main(logs_path="logs/ppo_cartpole_3")
-	eval()
-	# test()
+	# train for 8 mil timesteps like in cleanRL implementation, using stable baselines hyperparams 
+	main(logs_path="logs/ppo_pong/1", epochs=500, value_coeff=0.5, entropy_coeff=0.01, train_iters=4, anneal_lr = False, 
+      clip=0.1, save_every_epochs=50, share_extractor=True, num_envs=8, learning_rate=2e-4, save_path="models/ppo_pong/1", start_from_epoch=0,
+	  chkpt_path=None, target_kl=None, rollout_len=2048, log_steps=False)
+	# eval(load_model="models/ppo_pong/4.pth")
