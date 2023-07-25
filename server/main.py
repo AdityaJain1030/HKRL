@@ -30,7 +30,7 @@ async def make_env(timescale, frames_per_wait, n_envs = 4):
 	# env = gym.wrappers.FrameStack(env, 4)
 	# return env
 	env = MultiEnv(n_env=n_envs, render_colored=False, time_scale=timescale,
-				   frames_per_wait=frames_per_wait, level="GG_Mega_Moss_Charger", pause_after_step=True)
+				   frames_per_wait=frames_per_wait, level="GG_Mega_Moss_Charger", pause_after_step=False)
 	await env.loadAll()
 	return env
 
@@ -67,6 +67,28 @@ async def main(
 		(1, env.obs_size[0], env.obs_size[1]), (env.action_size,), lr=lr, gamma=gamma)
 	buffer = ReplayBuffer(buffer_size)
 	logger = Logger(log_path)
+	logger.log_hps({
+		"init_eplison": init_eplison,
+		"final_eplison": final_eplison,
+		"e_greedy_steps": e_greedy_steps,
+		"lr": lr,
+		"gamma": gamma,
+		"batch_size": batch_size,
+		"buffer_size": buffer_size,
+		"update_target_every": update_target_every,
+		"learning_starts": learning_starts,
+		"soft_update_every": soft_update_every,
+		"train_every": train_every,
+		"train_timesteps": train_timesteps,
+		"save_every": save_every,
+		"max_timesteps": max_timesteps,
+		"save_path": save_path,
+		"log_path": log_path,
+		"time_scale": time_scale,
+		"frames_per_wait": frames_per_wait,
+		"load_model": load_model,
+		"number_of_envs": number_of_envs,
+	})
 	
 	if load_model is not None:
 		print("loading model: " + load_model)
@@ -141,7 +163,7 @@ async def main(
 			logger.log_scalar("avg_loss", np.mean(ep_loss), episode)
 			logger.log_scalar("eplison", eplison, episode)
 			# logger.log_barplot("ep_actions", action_list, ep_actions, episode)
-			logger.log_scalar("avg_sample_age", np.mean(ep_sample_age), episode)
+			logger.log_scalar("avg_sample_age", np.mean(ep_sample_age), episode + 60)
 
 			ep_len = 0
 			ep_reward = []
@@ -177,21 +199,21 @@ async def eval(model, time_scale=1, frames_per_wait=5):
 # Adapted atari hyperparams 
 asyncio.run(main(
 	log_path="./logs/hollow_knight/mossbag" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
-	train_every=4,
-	train_timesteps=1000000,
-	update_target_every=1000,
-	learning_starts=100000,
-	e_greedy_steps=100000,
+	train_every=32, #Hypothesis: Frame delay killing training
+	train_timesteps=1000000, #3000000 already trained
+	update_target_every=10000,
+	learning_starts=25000, # start from pretrained model
+	e_greedy_steps=300000,
 	save_every=50000,
-	max_timesteps=5000, #half of atari b/c enemies seem to disappear after a while
-	buffer_size=500000,
-	gamma=0.995,
-	time_scale=3,
+	max_timesteps=2500, #half of atari b/c enemies seem to disappear after a while
+	buffer_size=100000,
+	gamma=0.99, #reduce target error
+	time_scale=1,
 	frames_per_wait=2,
-	batch_size=32,
-	lr=0.0001,
-	# load_model="./models/hollow_knight/mossbag3_cnn60000.pt",
-	save_path="./models/hollow_knight/mossbag4",
+	batch_size=256,
+	lr=0.00008,
+	# load_model="./models/hollow_knight/mossbag4_cnn300000.pt", #start from pretrained model
+	save_path="./models/hollow_knight/mossbag7",
 	init_eplison=0.95, #start from pretrained model
 	))
 

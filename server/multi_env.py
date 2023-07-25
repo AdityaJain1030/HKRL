@@ -77,6 +77,10 @@ class MultiEnv:
 
 	async def reset(self, env_id):
 		await self.connected[env_id].wait()
+
+		if self.pause_after_step:
+			await self.resume(env_id)
+			
 		message = message = await self.sendMessage('reset',  {
 			'state_size': self.obs_size,
 			'action_size': self.action_size - 1,
@@ -95,9 +99,9 @@ class MultiEnv:
 			obs = np.asarray(message['data']['state'], dtype=np.float16)
 			obs = obs.reshape(self.obs_size[0], self.obs_size[1])
 			obs /= 4
-			obs *= 255
+			# obs *= 255
 
-		obs = np.rot90(obs)
+		# obs = np.rot90(obs)
 		obs = np.expand_dims(obs, axis=0)
 
 
@@ -125,9 +129,9 @@ class MultiEnv:
 			obs = np.asarray(message['data']['state'], dtype=np.float16)
 			obs = obs.reshape(self.obs_size[0], self.obs_size[1])
 			obs /= 4
-			obs *= 255
+			# obs *= 255
 
-		obs = np.rot90(obs)
+		# obs = np.rot90(obs)
 		obs = np.expand_dims(obs, axis=0)
 
 		return obs, message['data']['reward'], message['data']['done'], message['data']['info']

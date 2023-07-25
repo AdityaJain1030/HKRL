@@ -29,11 +29,11 @@ class DQN(nn.Module, ABC):
 			out_size = self.head(torch.zeros(1, *obs_size)).numel()
 		
 		self.actions_head = nn.Sequential(
-			nn.Linear(out_size, 128),
+			nn.Linear(out_size, 256),
 			nn.ReLU(),
-			nn.Linear(128, 128),
+			nn.Linear(256, 256),
 			nn.ReLU(),
-			nn.Linear(128, act_size[0])
+			nn.Linear(256, act_size[0])
 		)
 		self.Q = nn.Sequential(
 			self.head,

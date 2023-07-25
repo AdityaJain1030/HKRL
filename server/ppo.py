@@ -322,7 +322,7 @@ def main(
 		anneal_lr=True,
 		log_steps=False
 ):
-	env = make_env("PongNoFrameskip-v4", num_envs=num_envs)
+	env = make_env("BreakoutNoFrameskip-v4", num_envs=num_envs)
 	# env = make_cartpole_env(num_envs)
 	agent = PPO(
 		env.single_observation_space.shape, env.single_action_space.n, lr=learning_rate, gamma=gamma, clip=clip, value_coeff=value_coeff,
@@ -379,9 +379,9 @@ def main(
 		obs_buf = np.ndarray((rollout_len + 1, num_envs, *
 							  env.single_observation_space.shape), dtype=np.float32)
 		act_buf = np.ndarray(
-			(rollout_len, num_envs, *env.single_action_space.shape), dtype=np.int32)
+			(rollout_len, num_envs), dtype=np.int32)
 		old_log_probs_buf = np.ndarray(
-			(rollout_len, num_envs, *env.single_action_space.shape), dtype=np.float32)
+			(rollout_len, num_envs), dtype=np.float32)
 		rews_buf = np.ndarray((rollout_len, num_envs), dtype=np.float32)
 		dones_buf = np.ndarray((rollout_len, num_envs), dtype=np.float32)
 
@@ -503,7 +503,7 @@ def main(
 
 
 def eval(load_model=None, load_chkpt=None):
-	env = make_env("PongNoFrameskip-v4", render_mode="human", num_envs=1)
+	env = make_env("BreakoutNoFrameskip-v4", render_mode="human", num_envs=1)
 	# env = gym.make("CartPole-v1", render_mode="human")
 	agent = PPO(env.single_observation_space.shape,
 				env.single_action_space.n, share_extractor=True)
@@ -524,8 +524,8 @@ def eval(load_model=None, load_chkpt=None):
 		obs = process_obs(next_obs)
 
 if __name__ == "__main__":
-	# train for 8 mil timesteps like in cleanRL implementation, using stable baselines hyperparams 
-	main(logs_path="logs/ppo_pong/1", epochs=500, value_coeff=0.5, entropy_coeff=0.01, train_iters=4, anneal_lr = False, 
-      clip=0.1, save_every_epochs=50, share_extractor=True, num_envs=8, learning_rate=2e-4, save_path="models/ppo_pong/1", start_from_epoch=0,
-	  chkpt_path=None, target_kl=None, rollout_len=2048, log_steps=False)
-	# eval(load_model="models/ppo_pong/4.pth")
+	# train for 10 mil timesteps like in cleanRL implementation 
+	main(logs_path="logs/ppo_breakoutclean_rl_hyperparams", epochs=10000, value_coeff=0.5, entropy_coeff=0.01, train_iters=4, anneal_lr = True, 
+      clip=0.1, save_every_epochs=50, share_extractor=True, num_envs=8, learning_rate=2e-4, save_path="models/ppo_breakout/clean_rl_hyperparams", start_from_epoch=0,
+	  target_kl=None, rollout_len=128, log_steps=True)
+	# eval(load_chkpt="models/ppo_breakout/clean_rl_hyperparams_3400.pth")

@@ -16,3 +16,11 @@ class Logger:
 		fig = plt.figure()
 		plt.bar(keys, values)
 		self.writer.add_figure(tag, fig, step)
+		self.writer.flush()
+	
+	def log_hps(self, hparams, metrics):
+		metrics = {k: 0.0 for k in metrics}
+		metrics["a"] = 0.0
+		print(metrics)
+		self.writer.add_hparams(hparams, metrics)
+		self.writer.flush()
