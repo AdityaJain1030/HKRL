@@ -148,7 +148,7 @@ namespace HKRL.Environments
 			{
 				yield return null;
 			}
-			data.reward = (damageDoneInStep / 4) - (10 * hitsTakenInStep);
+			data.reward = (damageDoneInStep / 80) - (1 * hitsTakenInStep); // regularize between -1 and 1
 			data.done = bossWouldDieInStep;
 			// inputDeviceShim.Reset();
 			Image observation = GetObservation();
