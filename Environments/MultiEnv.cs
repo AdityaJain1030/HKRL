@@ -83,7 +83,7 @@ namespace HKRL.Environments
 			Level = data.level;
 			frameSkipCount = data.frames_per_wait.Value;
 			TimeScale = data.time_scale.Value;
-			FrameStack = data.frame_stack.Value;
+			// FrameStack = data.frame_stack.Value;
 			
 
 			// yield return LoadLevel(Level);
@@ -140,6 +140,9 @@ namespace HKRL.Environments
 
 		private IEnumerator Step(MessageData data)
 		{
+			// hitsTakenInStep = 0;
+			// damageDoneInStep = 0;
+			// bossWouldDieInStep = false;
 			ActionCodeToInput(data.action.Value);
 			for (int i = 0; i < frameSkipCount; i++)
 			{
