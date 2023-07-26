@@ -23,7 +23,7 @@ async def main(
 	epochs=400,
 	rollout_len=4096,
 	save_every_epochs=50,
-	save_path="models/ppo_mosscharger/",
+	save_path="models/hollow_knight/ppo_mosscharger/",
 	learning_rate=2.5e-4,
 	gamma=0.99,
 	clip=0.1,
