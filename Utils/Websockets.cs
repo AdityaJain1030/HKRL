@@ -78,7 +78,7 @@ namespace HKRL.Utils
 		public string level;
 		public int? frames_per_wait;
 		public int[] state;
-		public int? reward;
+		public float? reward;
 		public string info;
 		public bool? done;
 		public int? action_taken;

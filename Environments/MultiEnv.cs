@@ -15,7 +15,10 @@ namespace HKRL.Environments
 		public string Level;
 		private int hitsTakenInStep = 0;
 		private int damageDoneInStep = 0;
+		private int totalDamageTaken = 0;
+		private int bossHP = 0;
 		private bool bossWouldDieInStep = false;
+		private const int PLAYERHEALTH = 8;
 		public int frameSkipCount;
 		public bool FrameStack;
 		public int TimeScale = 1;
@@ -83,11 +86,13 @@ namespace HKRL.Environments
 			Level = data.level;
 			frameSkipCount = data.frames_per_wait.Value;
 			TimeScale = data.time_scale.Value;
+			totalDamageTaken = 0;
 			// FrameStack = data.frame_stack.Value;
 			
 
 			// yield return LoadLevel(Level);
 			yield return SceneHooks.LoadBossScene(Level);
+			bossHP = BossSceneController.Instance.bosses[0].hp;
 			ModHooks.AfterTakeDamageHook -= SetZeroDamage;
 			On.HealthManager.TakeDamage -= SetHitsDealtInStep;
 
@@ -110,13 +115,18 @@ namespace HKRL.Environments
 
 		private int SetZeroDamage(int damageType, int _){
 			hitsTakenInStep++;
-			return 0;
+			totalDamageTaken ++;
+			if (totalDamageTaken > PLAYERHEALTH) {
+				return 0;
+			}
+			return 1; // for videos
+			// return 0;
 		}
 
 		private void SetHitsDealtInStep(On.HealthManager.orig_TakeDamage orig, HealthManager self, HitInstance hitInstance)
 		{
 			damageDoneInStep += hitInstance.DamageDealt;
-			bossWouldDieInStep = SceneHooks.ResetBossHealthAfterThreshold(orig, self, hitInstance, 50, 800);
+			bossWouldDieInStep = SceneHooks.ResetBossHealthAfterThreshold(orig, self, hitInstance, -100, bossHP);
 			orig(self, hitInstance);
 		}
 
@@ -148,8 +158,8 @@ namespace HKRL.Environments
 			{
 				yield return null;
 			}
-			data.reward = (damageDoneInStep / 80) - (1 * hitsTakenInStep); // regularize between -1 and 1
-			data.done = bossWouldDieInStep;
+			data.reward = (((float)damageDoneInStep * PLAYERHEALTH) / ((float)bossHP + 1e-8f)) - (1 * hitsTakenInStep); // regularize between -1 and 1 (mostly)
+			data.done = bossWouldDieInStep || totalDamageTaken > PLAYERHEALTH;
 			// inputDeviceShim.Reset();
 			Image observation = GetObservation();
 			data.state = observation.ToIntArray();

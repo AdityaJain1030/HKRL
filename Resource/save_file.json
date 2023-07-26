@@ -59,7 +59,7 @@
 			"z": 0.0
 		},
 		"geoPool": 0,
-		"nailDamage": 45,
+		"nailDamage": 21,
 		"nailRange": 0,
 		"beamDamage": 22,
 		"canDash": true,
