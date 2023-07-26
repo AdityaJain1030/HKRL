@@ -89,5 +89,9 @@ namespace HKRL.Utils
 		public int? soul_level;
 		public int? time_scale;
 		public bool? frame_stack;
+		public int? boss_damage_taken;
+		public int? player_hits_taken;
+		public int? boss_total_health;
+		public int? player_total_health;
 	}
 }

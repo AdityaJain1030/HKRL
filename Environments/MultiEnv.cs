@@ -102,6 +102,10 @@ namespace HKRL.Environments
 
 			Image observation = GetObservation();
 			data.state = observation.ToIntArray();
+			data.boss_damage_taken = damageDoneInStep;
+			data.player_hits_taken = hitsTakenInStep;
+			data.boss_total_health = bossHP;
+			data.player_total_health = PLAYERHEALTH;
 
 			SendMessage(new Message
 			{
@@ -163,6 +167,10 @@ namespace HKRL.Environments
 			// inputDeviceShim.Reset();
 			Image observation = GetObservation();
 			data.state = observation.ToIntArray();
+			data.boss_damage_taken = damageDoneInStep;
+			data.player_hits_taken = hitsTakenInStep;
+			data.boss_total_health = bossHP;
+			data.player_total_health = PLAYERHEALTH;
 			
 			SendMessage(new Message
 			{
