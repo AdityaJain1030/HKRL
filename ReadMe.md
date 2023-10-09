@@ -2,6 +2,8 @@
 
 RL agents to play Hollow Knight. Includes a Hollow Knight Mod to get the game state and a gym-like python environment to train on.
 
+See it in action [here!](https://www.youtube.com/watch?v=D6XFUatjdDc)
+
 Currently Implemented:
 
 - Mod to hook into Hollow Knight and send data to websocket server
