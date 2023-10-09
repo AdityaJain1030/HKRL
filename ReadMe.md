@@ -12,6 +12,7 @@ Currently Implemented:
 - GPU utilization
 - DQN
 - PPO
+- Environment manager for extensible env development
   
 
 TODO:
@@ -22,5 +23,4 @@ TODO:
   - DDPG
   - SAC
 - Move to shared memory for faster IPC
-- Environment manager for extensible env development
 - Add stablebaselines support
